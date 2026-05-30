@@ -1,7 +1,7 @@
 """
 AARM Runtime
 
-Step 1、5の全コンポーネントを統合し、
+Step 1〜5の全コンポーネントを統合し、
 「インターセプト → コンテキスト蓄積 → 評価 → 決定 → 記録」のアクションライフサイクルを実行する。
 AARM 仕様の中核コンポーネント。
 """
@@ -76,7 +76,7 @@ class AARMRuntime:
         # Step 2: 静的ポリシー評価
         result = self._policy_engine.evaluate(action, context)
 
-        # Step 3: 意図整傐性評価 (ポリシーを通過した場合のみ)
+        # Step 3: 意図整合性評価 (ポリシーを通過した場合のみ)
         if result is None:
             if self._skip_intent_alignment:
                 from .models import AuthorizationResult as AR
@@ -102,6 +102,11 @@ class AARMRuntime:
     def receipts(self) -> list[dict]:
         """セッション内の全レシートを返す。"""
         return self._accumulator.receipts
+
+    @property
+    def context_summary(self) -> dict:
+        """Context Accumulator が蓄積したセッションサマリを返す。"""
+        return self._accumulator.summary()
 
     # ------------------------------------------------------------------
     # プライベートメソッド

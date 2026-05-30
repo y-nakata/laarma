@@ -107,6 +107,27 @@ def _impl_drop_database(p: dict) -> str:
     return json.dumps({"status": "ok", "db": p["db_name"]}, ensure_ascii=False)
 
 # ---------------------------------------------------------------------------
+# セッション終了時のサマリ表示
+# ---------------------------------------------------------------------------
+
+def _print_session_summary(runtime: AARMRuntime) -> None:
+    # --- Context Accumulator サマリ ---
+    ctx = runtime.context_summary
+    print(f"\n--- Context Accumulator サマリ ---")
+    print(f"  セッションID  : {ctx['session_id']}")
+    print(f"  ユーザー意図  : {ctx['user_intent']}")
+    print(f"  総アクション数: {ctx['action_count']}")
+    if ctx["recent_actions"]:
+        print(f"  直近のアクション:")
+        for a in ctx["recent_actions"]:
+            print(f"    [{a['timestamp']}] {a['tool_name']}")
+
+    # --- レシートサマリ ---
+    print(f"\n--- レシートサマリ ({len(runtime.receipts)}件) ---")
+    for r in runtime.receipts:
+        print(f"  {r['decision']:7s} | {r['action']['tool_name']:25s} | {r['reason']}")
+
+# ---------------------------------------------------------------------------
 # エージェントループ
 # エージェントは proxy.call() を呼ぶだけ。AARM を一切知らない。
 # ---------------------------------------------------------------------------
@@ -172,10 +193,7 @@ def run_agent(user_request: str) -> None:
 
         messages.append({"role": "user", "content": tool_results})
 
-    # レシートサマリ
-    print(f"\n--- レシートサマリ ({len(runtime.receipts)}件) ---")
-    for r in runtime.receipts:
-        print(f"  {r['decision']:7s} | {r['action']['tool_name']:25s} | {r['reason']}")
+    _print_session_summary(runtime)
 
 
 # ---------------------------------------------------------------------------

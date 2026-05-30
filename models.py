@@ -30,6 +30,36 @@ class Decision(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# アイデンティティコンテキスト (AARM 仕様 R6 / IV-A2)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class IdentityContext:
+    """
+    アクションを実行するアイデンティティの多層表現。
+    仕様 IV-A2 の identity context I に対応する。
+
+    Attributes:
+        human_principal:  アクションを依頼したユーザー (例: "alice@example.com")
+        service_identity: エージェントが使うサービスアカウント (例: "agent-svc@iam")
+        session_id:       エージェントインスタンス・会話セッションのID
+        privilege_scope:  このアクション時点での権限スコープ
+    """
+    human_principal:  str
+    service_identity: str
+    session_id:       str
+    privilege_scope:  list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "human_principal":  self.human_principal,
+            "service_identity": self.service_identity,
+            "session_id":       self.session_id,
+            "privilege_scope":  self.privilege_scope,
+        }
+
+
+# ---------------------------------------------------------------------------
 # アクション
 # ---------------------------------------------------------------------------
 
@@ -37,23 +67,27 @@ class Decision(str, Enum):
 class Action:
     """
     エージェントがツールを呼び出す1回分の操作。
+    仕様 IV-A3 の a = (t, op, p, id, ctx, ts) に対応する。
 
     Attributes:
         tool_name:   呼び出すツール名 (例: "write_file", "delete_record")
         parameters:  ツールに渡すパラメータ
+        identity:    このアクションを実行するアイデンティティ (R6)
         action_id:   自動生成される一意ID
         timestamp:   生成日時 (UTC)
     """
-    tool_name:  str
-    parameters: dict[str, Any]
-    action_id:  str      = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp:  datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    tool_name:   str
+    parameters:  dict[str, Any]
+    identity:    IdentityContext | None = None
+    action_id:   str      = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp:   datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         return {
             "action_id":  self.action_id,
             "tool_name":  self.tool_name,
             "parameters": self.parameters,
+            "identity":   self.identity.to_dict() if self.identity else None,
             "timestamp":  self.timestamp.isoformat(),
         }
 
@@ -99,7 +133,7 @@ class AuthorizationResult:
         reason:            判断理由 (監査ログ・デバッグ用)
         action:            評価対象のアクション
         receipt_id:        改ざん検知用の一意ID
-        receipt_hash:      action + decision + reason の SHA-256 ハッシュ
+        receipt_hash:      action (identity 含む) + decision + reason の SHA-256 ハッシュ
         modified_params:   decision == MODIFY の場合に使う修正後パラメータ
         timestamp:         判断日時 (UTC)
     """
@@ -115,11 +149,11 @@ class AuthorizationResult:
         self.receipt_hash = self._compute_hash()
 
     def _compute_hash(self) -> str:
-        """receipt の内容から SHA-256 を計算する。"""
+        """receipt の内容 (identity 含む) から SHA-256 を計算する。"""
         payload = json.dumps(
             {
                 "receipt_id": self.receipt_id,
-                "action":     self.action.to_dict(),
+                "action":     self.action.to_dict(),  # identity フィールドを含む
                 "decision":   self.decision.value,
                 "reason":     self.reason,
             },

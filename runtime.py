@@ -12,7 +12,7 @@ from typing import Any
 
 from .context_accumulator import ContextAccumulator
 from .intent_alignment import IntentAlignment
-from .models import Action, AuthorizationResult, Decision
+from .models import Action, AuthorizationResult, Decision, IdentityContext
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
 
 
@@ -24,21 +24,35 @@ class AARMRuntime:
     ALLOW の場合のみツールを実行し、結果を `record_tool_output()` で記録する。
 
     使い方:
-        runtime = AARMRuntime(user_intent="テストデータを整理してレポートを作る")
+        identity = IdentityContext(
+            human_principal="alice@example.com",
+            service_identity="agent-svc@iam",
+            session_id="sess_abc123",
+            privilege_scope=["read_file", "write_file"],
+        )
+        runtime = AARMRuntime(user_intent="レポートを作る", identity=identity)
         result = runtime.intercept("write_file", {"path": "report.md", "content": "..."})
-        if result.decision == Decision.ALLOW:
-            output = run_tool(...)
-            runtime.record_tool_output(result.action.action_id, output)
     """
 
     def __init__(
         self,
         user_intent: str,
+        identity: IdentityContext | None = None,
         policy: Policy | None = None,
         model: str = "claude-sonnet-4-20250514",
         metadata: dict[str, Any] | None = None,
         skip_intent_alignment: bool = False,
     ) -> None:
+        """
+        Args:
+            user_intent:            ユーザーの元の目的・リクエスト
+            identity:               このセッションを実行するアイデンティティ (R6)
+            policy:                 カスタムポリシー (省略時は DEFAULT_POLICY)
+            model:                  Intent Alignment で使う Claude モデル
+            metadata:               セッションの付加情報
+            skip_intent_alignment:  True の場合 Intent Alignment をスキップ (テスト用)
+        """
+        self._identity = identity
         self._accumulator = ContextAccumulator(user_intent=user_intent, metadata=metadata)
         self._policy_engine = PolicyEngine(policy=policy or DEFAULT_POLICY)
         self._intent_alignment = IntentAlignment(model=model)
@@ -53,15 +67,18 @@ class AARMRuntime:
         ツール呼び出しをインターセプトし、認可判断を返す。
 
         処理フロー:
-          1. Action を生成しコンテキストに記録 (派生シグナルも計算)
+          1. Action を生成 (identity を紐付け) しコンテキストに記録
           2. PolicyEngine で静的評価
-          3. IntentAlignment で (a, C) タプル評価 — 派生シグナル含むサマリを渡す
+          3. IntentAlignment で (a, C) タプル評価
           4. 認可結果をレシートログに記録
           5. 結果を返す
         """
-        action = Action(tool_name=tool_name, parameters=parameters)
-
-        # Step 1: アクション記録 + 派生シグナル計算
+        # Step 1: identity を紐付けた Action を生成
+        action = Action(
+            tool_name=tool_name,
+            parameters=parameters,
+            identity=self._identity,
+        )
         self._accumulator.record_action(action)
         context = self._accumulator.context
 
@@ -77,7 +94,6 @@ class AARMRuntime:
                     action=action,
                 )
             else:
-                # Context Accumulator のサマリ (派生シグナル含む) を渡す
                 result = self._intent_alignment.evaluate(
                     action,
                     self._accumulator.summary(),
@@ -107,6 +123,11 @@ class AARMRuntime:
         """Context Accumulator が蓄積したセッションサマリを返す (派生シグナル含む)。"""
         return self._accumulator.summary()
 
+    @property
+    def identity(self) -> IdentityContext | None:
+        """このセッションのアイデンティティを返す。"""
+        return self._identity
+
     # ------------------------------------------------------------------
     # プライベートメソッド
     # ------------------------------------------------------------------
@@ -119,8 +140,12 @@ class AARMRuntime:
             Decision.DEFER:   "\u23f8\ufe0f",
             Decision.STEP_UP: "\U0001f6a8",
         }.get(result.decision, "?")
+        identity_str = ""
+        if self._identity:
+            identity_str = f" | {self._identity.human_principal}"
         print(
             f"[AARM] {icon} {result.decision.value:7s} "
             f"| {result.action.tool_name:25s} "
             f"| {result.reason}"
+            f"{identity_str}"
         )

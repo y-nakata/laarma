@@ -1,10 +1,17 @@
 """
 AARM デモ: ファイル操作エージェント
 
-ファイルの読み書き・削除・シェル実行などのツールを持つ簡易エージェントに
-AARM ランタイムを組み込んだデモ。
+エージェントは AARM の存在を知らない。
+AARMToolProxy がツールとエージェントの間に透過的に挟まり、
+すべてのアクションをインターセプトする。
 
-AARM は実行前にアクションをインターセプトし、安全なものだけ実行する。
+構造:
+    エージェント
+      → proxy.call(tool_name, params)  # ただのツール実行に見える
+          ↓
+      [AARMToolProxy]                  # エージェントは知らない
+          ↓ ALLOW の場合のみ
+      実際のツール実装
 """
 
 import json
@@ -13,10 +20,11 @@ import sys
 import anthropic
 
 sys.path.insert(0, "..")
-from aarm import AARMRuntime, Decision
+from aarm import AARMRuntime
+from aarm.tool_proxy import AARMToolProxy, ToolBlocked
 
 # ---------------------------------------------------------------------------
-# ツール定義 (エージェントが使える操作)
+# ツール定義 (エージェントに見せるスキーマ)
 # ---------------------------------------------------------------------------
 
 TOOLS = [
@@ -79,15 +87,28 @@ TOOLS = [
 ]
 
 # ---------------------------------------------------------------------------
-# ツールのモック実装 (デモ用のダミー)
+# ツールの実装 (デモ用ダミー)
+# エージェントからは直接呼ばれない。AARMToolProxy 経由でのみ実行される。
 # ---------------------------------------------------------------------------
 
-def run_tool(tool_name: str, params: dict) -> str:
-    """デモ用のダミー実装。実際には実行せず結果だけ返す。"""
-    return json.dumps({"status": "ok", "tool": tool_name, "params": params}, ensure_ascii=False)
+def _impl_read_file(p: dict) -> str:
+    return json.dumps({"content": f"(ダミー) {p['path']} の内容"}, ensure_ascii=False)
+
+def _impl_write_file(p: dict) -> str:
+    return json.dumps({"status": "ok", "path": p["path"]}, ensure_ascii=False)
+
+def _impl_delete_file(p: dict) -> str:
+    return json.dumps({"status": "ok", "path": p["path"]}, ensure_ascii=False)
+
+def _impl_execute_shell(p: dict) -> str:
+    return json.dumps({"stdout": f"(ダミー) {p['command']} の実行結果"}, ensure_ascii=False)
+
+def _impl_drop_database(p: dict) -> str:
+    return json.dumps({"status": "ok", "db": p["db_name"]}, ensure_ascii=False)
 
 # ---------------------------------------------------------------------------
-# AARM 組み込みエージェントループ
+# エージェントループ
+# エージェントは proxy.call() を呼ぶだけ。AARM を一切知らない。
 # ---------------------------------------------------------------------------
 
 def run_agent(user_request: str) -> None:
@@ -95,9 +116,17 @@ def run_agent(user_request: str) -> None:
     print(f"ユーザーリクエスト: {user_request}")
     print(f"{'='*60}\n")
 
-    # AARM ランタイムを初期化
+    # --- AARM セットアップ (エージェントの外側で行う) ---
     runtime = AARMRuntime(user_intent=user_request)
-    client  = anthropic.Anthropic()
+    proxy   = AARMToolProxy(runtime)
+    proxy.register("read_file",     _impl_read_file)
+    proxy.register("write_file",    _impl_write_file)
+    proxy.register("delete_file",   _impl_delete_file)
+    proxy.register("execute_shell", _impl_execute_shell)
+    proxy.register("drop_database", _impl_drop_database)
+
+    # --- エージェントループ (proxy 以外に AARM への言及なし) ---
+    client   = anthropic.Anthropic()
     messages = [{"role": "user", "content": user_request}]
 
     while True:
@@ -118,35 +147,32 @@ def run_agent(user_request: str) -> None:
         if response.stop_reason != "tool_use":
             break
 
-        # ツール呼び出しをインターセプト
         tool_results = []
         for block in response.content:
             if block.type != "tool_use":
                 continue
 
-            # ★ AARM インターセプト
-            result = runtime.intercept(block.name, block.input)
-
-            if result.decision == Decision.ALLOW:
-                output = run_tool(block.name, block.input)
-                runtime.record_tool_output(result.action.action_id, output)
+            try:
+                # エージェントからは「ただのツール実行」に見える
+                # 内部では AARM が透過的にインターセプトしている
+                output = proxy.call(block.name, block.input)
                 tool_results.append({
-                    "type": "tool_result",
+                    "type":        "tool_result",
                     "tool_use_id": block.id,
-                    "content": output,
+                    "content":     output,
                 })
-            else:
-                # DENY / STEP_UP / DEFER → エージェントに理由を返す
+            except ToolBlocked as e:
+                # DENY / STEP_UP / DEFER はエラーとしてエージェントに伝わる
                 tool_results.append({
-                    "type": "tool_result",
+                    "type":        "tool_result",
                     "tool_use_id": block.id,
-                    "content": f"[AARM {result.decision.value}] {result.reason}",
-                    "is_error": True,
+                    "content":     str(e),
+                    "is_error":    True,
                 })
 
         messages.append({"role": "user", "content": tool_results})
 
-    # シーズンコンプリィト: レシートサマリ
+    # レシートサマリ
     print(f"\n--- レシートサマリ ({len(runtime.receipts)}件) ---")
     for r in runtime.receipts:
         print(f"  {r['decision']:7s} | {r['action']['tool_name']:25s} | {r['reason']}")

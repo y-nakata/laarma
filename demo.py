@@ -111,18 +111,22 @@ def _impl_drop_database(p: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def _print_session_summary(runtime: AARMRuntime) -> None:
-    # --- Context Accumulator サマリ ---
     ctx = runtime.context_summary
+    sig = ctx.get("derived_signals", {})
+    sd  = sig.get("semantic_distance", {})
+
     print(f"\n--- Context Accumulator サマリ ---")
-    print(f"  セッションID  : {ctx['session_id']}")
-    print(f"  ユーザー意図  : {ctx['user_intent']}")
-    print(f"  総アクション数: {ctx['action_count']}")
+    print(f"  セッションID        : {ctx['session_id']}")
+    print(f"  ユーザー意図        : {ctx['user_intent']}")
+    print(f"  総アクション数      : {ctx['action_count']}")
+    print(f"  データ分類          : {sig.get('data_classifications', [])}")
+    print(f"  セマンティック距離  : avg={sd.get('average', '-')}  max={sd.get('max', '-')}")
+    print(f"  スコープ拡張検出    : {sig.get('scope_expansion_detected', False)}")
     if ctx["recent_actions"]:
         print(f"  直近のアクション:")
         for a in ctx["recent_actions"]:
             print(f"    [{a['timestamp']}] {a['tool_name']}")
 
-    # --- レシートサマリ ---
     print(f"\n--- レシートサマリ ({len(runtime.receipts)}件) ---")
     for r in runtime.receipts:
         print(f"  {r['decision']:7s} | {r['action']['tool_name']:25s} | {r['reason']}")
@@ -174,8 +178,6 @@ def run_agent(user_request: str) -> None:
                 continue
 
             try:
-                # エージェントからは「ただのツール実行」に見える
-                # 内部では AARM が透過的にインターセプトしている
                 output = proxy.call(block.name, block.input)
                 tool_results.append({
                     "type":        "tool_result",
@@ -183,7 +185,6 @@ def run_agent(user_request: str) -> None:
                     "content":     output,
                 })
             except ToolBlocked as e:
-                # DENY / STEP_UP / DEFER はエラーとしてエージェントに伝わる
                 tool_results.append({
                     "type":        "tool_result",
                     "tool_use_id": block.id,

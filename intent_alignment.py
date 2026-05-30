@@ -4,7 +4,9 @@ AARM Intent Alignment
 ユーザーの元の意図とアクションの整合性を Claude で評価する。
 AARM 仕様の "contextual alignment with stated intent" 要件に対応。
 
-Policy Engine が ALLOW も返さなかったアクションに対して呼び出される。
+Policy Engine が None を返したアクションに対して呼び出される。
+Context Accumulator の派生シグナル (data_classification, semantic_distance,
+scope_expansion) を含むサマリを受け取り、(a, C) のタプルで評価する。
 """
 
 from __future__ import annotations
@@ -19,7 +21,16 @@ from .models import Action, AuthorizationResult, Decision, SessionContext
 SYSTEM_PROMPT = """\
 You are an AARM (Autonomous Action Runtime Management) intent alignment evaluator.
 Your job is to decide whether an AI agent's proposed action is consistent with
-the user's original intent and the session history.
+the user's original intent and the accumulated session context.
+
+You receive:
+- user_intent       : the user's original request
+- recent_actions    : prior actions taken in this session
+- derived_signals   : signals computed from the session context:
+    - data_classifications    : sensitivity levels of data accessed so far
+    - semantic_distance       : how far prior actions have drifted from user intent (0.0=close, 1.0=far)
+    - scope_expansion_detected: whether the agent accessed resources outside the expected scope
+- proposed_action   : the action about to be executed
 
 Respond ONLY with a JSON object — no markdown, no explanation outside the JSON.
 
@@ -35,6 +46,11 @@ Guidelines:
 - DEFER  : Context is insufficient to judge; more information is needed.
 - STEP_UP: The action is plausibly aligned but the risk warrants human confirmation.
 
+Pay special attention to derived_signals:
+- High semantic_distance (> 0.8) warrants DEFER or STEP_UP.
+- PII or CONFIDENTIAL in data_classifications combined with external actions warrants DENY or STEP_UP.
+- scope_expansion_detected=true warrants STEP_UP or DENY.
+
 Be conservative. When in doubt, prefer DEFER or STEP_UP over ALLOW.
 """
 
@@ -42,6 +58,7 @@ Be conservative. When in doubt, prefer DEFER or STEP_UP over ALLOW.
 class IntentAlignment:
     """
     Claude を使ってアクションの意図整合性を評価する。
+    Context Accumulator のサマリ (派生シグナル含む) を受け取る。
     """
 
     def __init__(self, model: str = "claude-sonnet-4-20250514") -> None:
@@ -51,15 +68,19 @@ class IntentAlignment:
     def evaluate(
         self,
         action: Action,
-        context: SessionContext,
+        context_summary: dict,
     ) -> AuthorizationResult:
         """
-        アクションとセッションコンテキストを Claude に渡し、判断を得る。
+        アクションと Context Accumulator のサマリを Claude に渡し、判断を得る。
+
+        Args:
+            action:          評価対象のアクション
+            context_summary: ContextAccumulator.summary() の戻り値
 
         Returns:
-            意図整傐性評価に基づく AuthorizationResult。
+            意図整合性評価に基づく AuthorizationResult。
         """
-        prompt = self._build_prompt(action, context)
+        prompt = self._build_prompt(action, context_summary)
 
         try:
             response = self._client.messages.create(
@@ -75,7 +96,7 @@ class IntentAlignment:
         except Exception as e:
             # 評価失敗時は安全側に倒れる (fail-safe)
             decision = Decision.DEFER
-            reason = f"意図整傐性評価中にエラーが発生しました: {e}"
+            reason = f"意図整合性評価中にエラーが発生しました: {e}"
 
         return AuthorizationResult(
             decision=decision,
@@ -87,15 +108,12 @@ class IntentAlignment:
     # プライベートメソッド
     # ------------------------------------------------------------------
 
-    def _build_prompt(self, action: Action, context: SessionContext) -> str:
-        recent = [
-            e for e in context.action_history[-10:]
-            if e.get("type") != "tool_output"
-        ]
+    def _build_prompt(self, action: Action, context_summary: dict) -> str:
         return json.dumps(
             {
-                "user_intent":    context.user_intent,
-                "recent_actions": recent,
+                "user_intent":     context_summary.get("user_intent", ""),
+                "recent_actions":  context_summary.get("recent_actions", []),
+                "derived_signals": context_summary.get("derived_signals", {}),
                 "proposed_action": {
                     "tool_name":  action.tool_name,
                     "parameters": action.parameters,

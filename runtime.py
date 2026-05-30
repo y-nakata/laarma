@@ -8,7 +8,6 @@ AARM 仕様の中核コンポーネント。
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from .context_accumulator import ContextAccumulator
@@ -28,7 +27,6 @@ class AARMRuntime:
         runtime = AARMRuntime(user_intent="テストデータを整理してレポートを作る")
         result = runtime.intercept("write_file", {"path": "report.md", "content": "..."})
         if result.decision == Decision.ALLOW:
-            # ツールを実行する
             output = run_tool(...)
             runtime.record_tool_output(result.action.action_id, output)
     """
@@ -41,14 +39,6 @@ class AARMRuntime:
         metadata: dict[str, Any] | None = None,
         skip_intent_alignment: bool = False,
     ) -> None:
-        """
-        Args:
-            user_intent:            ユーザーの元の目的・リクエスト
-            policy:                 カスタムポリシー (省略時は DEFAULT_POLICY)
-            model:                  Intent Alignment で使う Claude モデル
-            metadata:               セッションの付加情報
-            skip_intent_alignment:  True の場合 Intent Alignment をスキップ (テスト用)
-        """
         self._accumulator = ContextAccumulator(user_intent=user_intent, metadata=metadata)
         self._policy_engine = PolicyEngine(policy=policy or DEFAULT_POLICY)
         self._intent_alignment = IntentAlignment(model=model)
@@ -63,13 +53,15 @@ class AARMRuntime:
         ツール呼び出しをインターセプトし、認可判断を返す。
 
         処理フロー:
-          1. Action を生成しコンテキストに記録
-          2. PolicyEngine で静的評価 (引っかかればそのまま返す)
-          3. IntentAlignment で内容評価
+          1. Action を生成しコンテキストに記録 (派生シグナルも計算)
+          2. PolicyEngine で静的評価
+          3. IntentAlignment で (a, C) タプル評価 — 派生シグナル含むサマリを渡す
           4. 認可結果をレシートログに記録
           5. 結果を返す
         """
         action = Action(tool_name=tool_name, parameters=parameters)
+
+        # Step 1: アクション記録 + 派生シグナル計算
         self._accumulator.record_action(action)
         context = self._accumulator.context
 
@@ -79,10 +71,17 @@ class AARMRuntime:
         # Step 3: 意図整合性評価 (ポリシーを通過した場合のみ)
         if result is None:
             if self._skip_intent_alignment:
-                from .models import AuthorizationResult as AR
-                result = AR(decision=Decision.ALLOW, reason="ポリシーチェック通過。", action=action)
+                result = AuthorizationResult(
+                    decision=Decision.ALLOW,
+                    reason="ポリシーチェック通過。",
+                    action=action,
+                )
             else:
-                result = self._intent_alignment.evaluate(action, context)
+                # Context Accumulator のサマリ (派生シグナル含む) を渡す
+                result = self._intent_alignment.evaluate(
+                    action,
+                    self._accumulator.summary(),
+                )
 
         # Step 4: レシート記録
         self._accumulator.record_result(result)
@@ -105,7 +104,7 @@ class AARMRuntime:
 
     @property
     def context_summary(self) -> dict:
-        """Context Accumulator が蓄積したセッションサマリを返す。"""
+        """Context Accumulator が蓄積したセッションサマリを返す (派生シグナル含む)。"""
         return self._accumulator.summary()
 
     # ------------------------------------------------------------------

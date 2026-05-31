@@ -7,9 +7,8 @@ AARM の価値を示こ4つのシナリオを実行する。
 
 import sys
 import os
-# ルートと SDK ソースを path に追加して aarm パッケージを正しく参照する
+# ルートを path に追加して aarm パッケージを正しく参照する
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, os.path.join(root_dir, "aarm", "sdk", "src"))
 sys.path.insert(0, root_dir)
 
 from aarm import IdentityContext

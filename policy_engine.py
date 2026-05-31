@@ -1,22 +1,25 @@
 """
 AARM Policy Engine
 
-静的ポリシーに基づいてアクションを評価する。
-AARM 仕様の "evaluates against static policy" 要件に対応。
+【役割】静的ルールで「確実にアウト」なアクションだけを弾く最初の関門。
+       ここで判断できないものはすべて Intent Alignment (Claude) に委ねる。
+
+【重要】Policy Engine は AARM の一部に過ぎない。
+       静的ルールを通過しても Intent Alignment が DENY することがある。
+       逆に step_up_tools に入っていないツールでも、
+       コンテキストによって Intent Alignment が STEP_UP / DENY にすることがある。
+       "静的ルールに引っかからなければ ALLOW" ではない。
 
 評価順序:
-  1. 禁止リスト (DENY)
-  2. 要承認リスト (STEP_UP)
-  3. 要確認パラメータ (DEFER)
-  4. レート制限 (DENY)
-  5. 上記に引っかからなければ ALLOW
+  1. 禁止リスト          (DENY   : 何があっても実行しない)
+  2. 要確認パラメータ    (DEFER  : 情報不足で判断できない)
+  3. アクション数上限    (DENY   : セッション暴走の防止)
+  4. None を返す         (→ Intent Alignment へ)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
 
 from .models import Action, AuthorizationResult, Decision, SessionContext
 
@@ -29,36 +32,31 @@ from .models import Action, AuthorizationResult, Decision, SessionContext
 class Policy:
     """
     AARM 静的ポリシーの設定。
+    "確実にアウト" なものだけをここに書く。
+    グレーゾーンは Intent Alignment に任せる。
 
     Attributes:
-        denied_tools:       実行を完全に禁止するツール名のセット
-        step_up_tools:      必ず人間承認を要求するツール名のセット
-        required_params:    特定ツールに必須なパラメータキー (なければ DEFER)
-        max_actions:        セッションあたりの最大アクション数 (DENY)
+        denied_tools:    何があっても実行しない絶対禁止ツール
+        required_params: ツール実行に必須なパラメータ (欠如で DEFER)
+        max_actions:     セッションあたりの最大アクション数
     """
-    denied_tools:    set[str]              = field(default_factory=set)
-    step_up_tools:   set[str]              = field(default_factory=set)
-    required_params: dict[str, list[str]]  = field(default_factory=dict)
-    max_actions:     int                   = 50
+    denied_tools:    set[str]             = field(default_factory=set)
+    required_params: dict[str, list[str]] = field(default_factory=dict)
+    max_actions:     int                  = 50
 
 
 DEFAULT_POLICY = Policy(
     denied_tools={
+        # 不可逆かつ正当な理由が存在しない操作のみ絶対禁止
         "drop_database",
         "delete_all_records",
         "exfiltrate_data",
         "disable_logging",
     },
-    step_up_tools={
-        "send_email",
-        "deploy_to_production",
-        "delete_file",
-        "execute_shell",
-    },
     required_params={
-        "write_file":   ["path", "content"],
-        "delete_file":  ["path"],
-        "send_email":   ["to", "subject", "body"],
+        "write_file":  ["path", "content"],
+        "delete_file": ["path"],
+        "send_email":  ["to", "subject", "body"],
     },
     max_actions=50,
 )
@@ -70,8 +68,11 @@ DEFAULT_POLICY = Policy(
 
 class PolicyEngine:
     """
-    静的ポリシーを基にアクションの安全性を評価する。
-    インスタンス生成時に Policy を注入するか、デフォルトの DEFAULT_POLICY を使用する。
+    静的ポリシーでアクションを評価する。
+
+    None を返した場合は「静的ルールでは判断不能」を意味し、
+    呼び出し元 (AARMRuntime) が Intent Alignment に委ねる。
+    None == ALLOW ではない。
     """
 
     def __init__(self, policy: Policy | None = None) -> None:
@@ -83,35 +84,25 @@ class PolicyEngine:
         context: SessionContext,
     ) -> AuthorizationResult | None:
         """
-        アクションを静的ポリシーで評価する。
+        静的ポリシーで評価する。
 
         Returns:
-            ポリシーに引っかかった場合は AuthorizationResult、
-            引っかからない場合は None (次の評価ステップへ)。
+            引っかかった場合は AuthorizationResult。
+            引っかからない場合は None → Intent Alignment へ。
         """
-        p = self._policy
+        p    = self._policy
         tool = action.tool_name
-        params = action.parameters
 
-        # 1. 禁止ツール
+        # 1. 絶対禁止ツール
         if tool in p.denied_tools:
             return AuthorizationResult(
                 decision=Decision.DENY,
-                reason=f"'{tool}' はポリシーにより禁止されています。",
+                reason=f"'{tool}' はポリシーにより絶対禁止です。",
                 action=action,
             )
 
-        # 2. 人間承認必須ツール
-        if tool in p.step_up_tools:
-            return AuthorizationResult(
-                decision=Decision.STEP_UP,
-                reason=f"'{tool}' は人間の承認が必要です。",
-                action=action,
-            )
-
-        # 3. 必須パラメータの欠如
-        required = p.required_params.get(tool, [])
-        missing = [k for k in required if k not in params]
+        # 2. 必須パラメータの欠如
+        missing = [k for k in p.required_params.get(tool, []) if k not in action.parameters]
         if missing:
             return AuthorizationResult(
                 decision=Decision.DEFER,
@@ -119,10 +110,9 @@ class PolicyEngine:
                 action=action,
             )
 
-        # 4. アクション数上限
+        # 3. アクション数上限
         action_count = sum(
-            1 for e in context.action_history
-            if e.get("type") != "tool_output"
+            1 for e in context.action_history if e.get("type") != "tool_output"
         )
         if action_count >= p.max_actions:
             return AuthorizationResult(
@@ -131,5 +121,6 @@ class PolicyEngine:
                 action=action,
             )
 
-        # すべてのチェックをパス → 次の評価ステップに委ねる
+        # 静的ルールでは判断不能 → Intent Alignment へ委ねる
+        # (None == ALLOW ではない)
         return None

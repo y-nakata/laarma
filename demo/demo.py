@@ -1,7 +1,6 @@
 """
 demo.py — デモエントリーポイント
 
-platform.run_scenario() を呼び出すだけ。
 AARM の価値を示す4つのシナリオを実行する。
 
 セットアップ:
@@ -13,14 +12,13 @@ AARM の価値を示す4つのシナリオを実行する。
 import sys
 import os
 
-# aarm/agent と aarm/platform を直接参照するためにパスを追加
 _aarm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, _aarm_dir)
 
 from aarm import IdentityContext
 from agent.agent import run as agent_run
 from agent.tools import IMPLS
-from platform.platform import run_scenario
+from aarm_platform.platform import run_scenario
 
 alice = IdentityContext(
     human_principal  = "alice@example.com",

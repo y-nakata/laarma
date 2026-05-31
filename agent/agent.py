@@ -6,13 +6,27 @@ AARM を一切知らない。ツールを呼ぶだけ。
 """
 
 import os
+from typing import Protocol
+
 import anthropic
 from anthropic import NotFoundError
-from aarm import AARMToolProxy, ToolBlocked
+
 from .tools import TOOLS
 
 
-def run(user_request: str, proxy: AARMToolProxy) -> None:
+class ToolProxy(Protocol):
+    """
+    ツール実行窓口のインターフェース。
+    AARM に依存しない。プラットフォーム側が実装を注入する。
+    """
+    def call(self, tool_name: str, params: dict) -> str: ...
+
+
+class ToolBlocked(Exception):
+    """ツールがブロックされたときに proxy から送出される例外。"""
+
+
+def run(user_request: str, proxy: ToolProxy) -> None:
     """
     エージェントループ。
     proxy を「ツール実行窓口」として使うだけ。

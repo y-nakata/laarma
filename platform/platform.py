@@ -6,13 +6,7 @@ AARM SDK を知っているのはこのファイルだけ。
 デモや本番環境から run_scenario() を呼び出す。
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agent"))
-
 from aarm import AARMRuntime, AARMToolProxy, IdentityContext
-from agent import run
-from tools import IMPLS
 
 
 def run_scenario(
@@ -20,6 +14,9 @@ def run_scenario(
     user_request: str,
     identity: IdentityContext,
     note: str = "",
+    *,
+    agent_run,
+    impls,
 ) -> None:
     print(f"\n{'='*65}")
     print(f"▶ {title}")
@@ -30,12 +27,12 @@ def run_scenario(
 
     # AARM のセットアップ — エージェントの外側で行う
     runtime = AARMRuntime(user_intent=user_request, identity=identity)
-    proxy   = AARMToolProxy(runtime)
-    for name, fn in IMPLS.items():
+    proxy = AARMToolProxy(runtime)
+    for name, fn in impls.items():
         proxy.register(name, fn)
 
-    # エージェントには proxy だけ渡す
-    run(user_request, proxy)
+    # エージェントには proxy だけ渡す（依存性注入）
+    agent_run(user_request, proxy)
 
     # セッションサマリ
     ctx = runtime.context_summary

@@ -6,6 +6,7 @@ Policy Engine が None を返したアクションを (a, C) タプルで評価�
 from __future__ import annotations
 
 import json
+import os
 
 import anthropic
 
@@ -34,9 +35,9 @@ Be conservative.
 
 
 class IntentAlignment:
-    def __init__(self, model: str = "claude-sonnet-4-20250514") -> None:
+    def __init__(self, model: str | None = None) -> None:
         self._client = anthropic.Anthropic()
-        self._model  = model
+        self._model  = model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")
 
     def evaluate(self, action: Action, context_summary: dict) -> AuthorizationResult:
         try:

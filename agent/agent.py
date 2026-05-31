@@ -5,9 +5,11 @@ AARM を一切知らない。ツールを呼ぶだけ。
 プラットフォーム側から proxy を注入される。
 """
 
+import os
 import anthropic
+from anthropic import NotFoundError
 from aarm import AARMToolProxy, ToolBlocked
-from tools import TOOLS
+from .tools import TOOLS
 
 
 def run(user_request: str, proxy: AARMToolProxy) -> None:
@@ -20,12 +22,19 @@ def run(user_request: str, proxy: AARMToolProxy) -> None:
     messages = [{"role": "user", "content": user_request}]
 
     while True:
-        resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            tools=TOOLS,
-            messages=messages,
-        )
+        model_name = os.getenv("AARM_MODEL", "claude-sonnet-4-6")
+        try:
+            resp = client.messages.create(
+                model=model_name,
+                max_tokens=1024,
+                tools=TOOLS,
+                messages=messages,
+            )
+        except NotFoundError as e:
+            raise RuntimeError(
+                f"Anthropic model '{model_name}' was not found. "
+                "Set AARM_MODEL to a valid model name for your Anthropic account."
+            ) from e
         messages.append({"role": "assistant", "content": resp.content})
 
         if resp.stop_reason == "end_turn":

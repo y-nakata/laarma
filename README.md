@@ -33,6 +33,8 @@ aarm/
 ```bash
 pip install -e aarm/sdk
 export ANTHROPIC_API_KEY=your_api_key
+# Free プラン向けのモデル
+export AARM_MODEL=claude-sonnet-4-6
 python aarm/demo/demo.py
 ```
 

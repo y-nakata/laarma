@@ -5,6 +5,7 @@ AARM Runtime — R1〜R6 統合
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .context_accumulator import ContextAccumulator
@@ -19,14 +20,14 @@ class AARMRuntime:
         user_intent: str,
         identity: IdentityContext | None = None,
         policy: Policy | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str | None = None,
         metadata: dict[str, Any] | None = None,
         skip_intent_alignment: bool = False,
     ) -> None:
         self._identity              = identity
         self._accumulator           = ContextAccumulator(user_intent=user_intent, metadata=metadata)
         self._policy_engine         = PolicyEngine(policy=policy or DEFAULT_POLICY)
-        self._intent_alignment      = IntentAlignment(model=model)
+        self._intent_alignment      = IntentAlignment(model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"))
         self._skip_intent_alignment = skip_intent_alignment
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:

@@ -50,7 +50,11 @@ class IntentAlignment:
                     "proposed_action": {"tool_name": action.tool_name, "parameters": action.parameters},
                 }, ensure_ascii=False, indent=2)}],
             )
-            parsed   = json.loads(resp.content[0].text.strip())
+            # type == "text" のブロックだけ取り出す
+            text_blocks = [b.text for b in resp.content if b.type == "text"]
+            if not text_blocks:
+                raise ValueError(f"No text block in response. stop_reason={resp.stop_reason}")
+            parsed   = json.loads(text_blocks[0].strip())
             decision = Decision(parsed["decision"])
             reason   = parsed.get("reason", "(reason not provided)")
         except Exception as e:

@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "laarma"
+version = "0.1.0"
+description = "Learning AARM Agent — AARM仕様のPython SDK試作"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

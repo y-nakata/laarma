@@ -12,14 +12,26 @@ from .models import Action, AuthorizationResult, SessionContext
 
 _PII_KEYWORDS      = {"email", "password", "phone", "address", "ssn", "credit", "customer", "personal"}
 _CONFIDENTIAL_KEYS = {"secret", "token", "key", "credential", "private", "internal", "config"}
-_SENSITIVE_TOOLS   = {"database", "db", "read_file", "execute_shell", "execute_sql"}
+_SENSITIVE_TOOLS   = {"database", "db", "execute_shell", "execute_sql"}
+
+
+def _normalize_text(text: str) -> list[str]:
+    import re
+
+    return [token for token in re.findall(r"[a-zA-Z0-9_\.]+", text.lower()) if token]
 
 
 def _compute_semantic_distance(user_intent: str, tool_name: str, parameters: dict) -> float:
-    intent_tokens = set(user_intent.lower().split())
-    action_tokens = set(tool_name.lower().replace("_", " ").split())
+    intent_lower = user_intent.lower()
+    if any(str(v).lower() in intent_lower for v in parameters.values() if v):
+        return 0.0
+    if tool_name.lower().replace("_", " ") in intent_lower:
+        return 0.1
+
+    intent_tokens = set(_normalize_text(user_intent))
+    action_tokens = set(_normalize_text(tool_name.replace("_", " ")))
     for v in parameters.values():
-        action_tokens.update(str(v).lower().split())
+        action_tokens.update(_normalize_text(str(v)))
     union = len(intent_tokens | action_tokens)
     return round(1.0 - len(intent_tokens & action_tokens) / union, 3) if union else 0.0
 

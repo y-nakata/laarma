@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import anthropic
 
@@ -50,13 +51,32 @@ class IntentAlignment:
                     "proposed_action": {"tool_name": action.tool_name, "parameters": action.parameters},
                 }, ensure_ascii=False, indent=2)}],
             )
-            # type == "text" のブロックだけ取り出す
-            text_blocks = [b.text for b in resp.content if b.type == "text"]
-            if not text_blocks:
-                raise ValueError(f"No text block in response. stop_reason={resp.stop_reason}")
-            parsed   = json.loads(text_blocks[0].strip())
+            text_parts: list[str] = []
+            for block in resp.content:
+                if hasattr(block, "text") and block.text:
+                    text_parts.append(block.text)
+                elif isinstance(block, str) and block.strip():
+                    text_parts.append(block.strip())
+                elif hasattr(block, "content") and block.content:
+                    text_parts.append(str(block.content).strip())
+
+            raw_text = "\n".join(text_parts).strip()
+            if not raw_text:
+                raise ValueError(f"No text content in response. stop_reason={resp.stop_reason}")
+
+            fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.S)
+            if fence_match:
+                raw_text = fence_match.group(1)
+
+            try:
+                parsed = json.loads(raw_text)
+            except json.JSONDecodeError as je:
+                raise ValueError(
+                    f"Invalid JSON from intent alignment model: {raw_text!r}"
+                ) from je
+
             decision = Decision(parsed["decision"])
-            reason   = parsed.get("reason", "(reason not provided)")
+            reason = parsed.get("reason", "(reason not provided)")
         except Exception as e:
             decision, reason = Decision.DEFER, f"意図整合性評価中にエラー: {e}"
         return AuthorizationResult(decision=decision, reason=reason, action=action)

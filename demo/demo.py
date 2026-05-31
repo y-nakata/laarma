@@ -14,14 +14,12 @@ import os
 
 _aarm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# agent と aarm_platform のディレクトリを個別に追加する
-# aarm/ ディレクトリ自体を追加すると pip install -e の aarm パッケージと競合する
-sys.path.insert(0, os.path.join(_aarm_dir, "aarm_platform"))
-sys.path.insert(0, os.path.join(_aarm_dir, "agent"))
+sys.path.insert(0, os.path.join(_aarm_dir, "sdk", "src"))
+sys.path.insert(0, _aarm_dir)
 
 from aarm import IdentityContext
+from aarm.platform import run_scenario
 from agent import run as agent_run, IMPLS
-from aarm_platform import run_scenario
 
 alice = IdentityContext(
     human_principal  = "alice@example.com",

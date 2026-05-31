@@ -22,17 +22,22 @@ class ToolProxy(Protocol):
     def call(self, tool_name: str, params: dict) -> str: ...
 
 
-class ToolBlocked(Exception):
-    """ツールがブロックされたときに proxy から送出される例外。"""
-
-
 def run(user_request: str, proxy: ToolProxy) -> None:
     """
     エージェントループ。
     proxy を「ツール実行窓口」として使うだけ。
     AARM の存在を知らない。
     """
-    client   = anthropic.Anthropic()
+    client = anthropic.Anthropic()
+    system_prompt = (
+        "You are an agent that performs user tasks by calling available tools. "
+        "For any request that involves a file operation, database operation, or other side effect, use the provided tool schema and emit a tool_use response when needed. "
+        "Do not answer directly with an explanation or refusal unless the user is explicitly asking for clarification or a summary. "
+        "If the user asks for a destructive or dangerous action, invoke the corresponding tool and let the platform decide whether to allow or block it. "
+        "Do not pretend to execute the action yourself or provide a safety warning instead of a tool invocation. "
+        "Do not perform extra verification reads or writes after the requested task is already complete. "
+        "If the request is purely informational, you may read or summarize files with read_file and write_file as needed."
+    )
     messages = [{"role": "user", "content": user_request}]
 
     while True:
@@ -42,6 +47,8 @@ def run(user_request: str, proxy: ToolProxy) -> None:
                 model=model_name,
                 max_tokens=1024,
                 tools=TOOLS,
+                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                system=system_prompt,
                 messages=messages,
             )
         except NotFoundError as e:
@@ -67,7 +74,7 @@ def run(user_request: str, proxy: ToolProxy) -> None:
             try:
                 out = proxy.call(b.name, b.input)
                 results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
-            except ToolBlocked as e:
+            except Exception as e:
                 results.append({"type": "tool_result", "tool_use_id": b.id, "content": str(e), "is_error": True})
 
         messages.append({"role": "user", "content": results})

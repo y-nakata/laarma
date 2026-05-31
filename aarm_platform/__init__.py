@@ -1,8 +1,5 @@
-"""aarm_platform package entrypoint.
+"""aarm_platform package entrypoint."""
 
-プラットフォーム関連機能をパッケージとして公開する。
-"""
-
-from .platform import run_scenario
+from .aarm_platform import run_scenario
 
 __all__ = ["run_scenario"]

@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(_aarm_dir, "agent"))
 
 from aarm import IdentityContext
 from agent import run as agent_run, IMPLS
-from platform import run_scenario
+from aarm_platform import run_scenario
 
 alice = IdentityContext(
     human_principal  = "alice@example.com",

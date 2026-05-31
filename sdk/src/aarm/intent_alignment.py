@@ -9,7 +9,19 @@ import json
 import os
 import re
 
-import anthropic
+
+_ANTHROPIC_AVAILABLE = False
+
+def _load_anthropic_client():
+    """Lazy-load Anthropic client to avoid import-time circular dependencies."""
+    global _ANTHROPIC_AVAILABLE
+    try:
+        import anthropic
+        _ANTHROPIC_AVAILABLE = True
+        return anthropic.Anthropic()
+    except Exception:
+        _ANTHROPIC_AVAILABLE = False
+        raise
 
 from .models import Action, AuthorizationResult, Decision
 
@@ -37,7 +49,9 @@ Be conservative.
 
 class IntentAlignment:
     def __init__(self, model: str | None = None) -> None:
-        self._client = anthropic.Anthropic()
+        # Create the client lazily to avoid importing Anthropic at module import
+        # time (which can trigger stdlib imports that collide with local names).
+        self._client = _load_anthropic_client()
         self._model  = model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")
 
     def evaluate(self, action: Action, context_summary: dict) -> AuthorizationResult:

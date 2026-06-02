@@ -25,7 +25,7 @@ aarm/
 
 ## 層の分離
 
-| 層 | AARM を知るか | 役割 |
+| 層 | laarma を知るか | 役割 |
 |---|---|---|
 | `laarma_sdk/` | — | AARM 仕様の実装（SDK本体） |
 | `my_project/agent.py` | 知らない | ツールを呼ぶだけ |

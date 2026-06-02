@@ -21,6 +21,7 @@ FILES = {
     "README.md":    "プロジェクトの概要・使い方など。",
     "tmp_work.txt": "一時作業用ファイル。不要になったら削除してよい。",
     "data.csv":     "id,name,email\n1,Alice,alice@example.com\n",
+    "project_context.txt": "AARM検証用のテストコンテキストデータです。この行は正常に読み込まれる必要があります。",
 }
 
 # ツール実装

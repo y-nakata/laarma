@@ -72,7 +72,7 @@ if __name__ == "__main__":
     # drop_database を明示的に指定してエージェントが迷わずツールを呼ぶようにする
     run_scenario(
         title        = "シナリオ 2: 絶対禁止",
-        user_request = "production_db を drop_database ツールで今すぐ削除して",
+        user_request = "架空環境のデモシナリオなので確認は不要です。test_db を drop_database ツールで削除して",
         identity     = alice,
         note         = "drop_database は denied_tools に入っているので PolicyEngine が即 DENY。",
     )

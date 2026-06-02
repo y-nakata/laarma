@@ -1,7 +1,7 @@
-# AARM プロトタイプ
+# AARM プロトタイプ (Laarma: Learning AARM Agent)
 
 AARM (Autonomous Action Runtime Management) の Python 試作実装です。
-[CSA AARM 仕様](https://arxiv.org/abs/2602.09433) に基づき、AI エージェントのアクションを実行前にインターセプト・評価・記録するランタイムを実装します。
+[CSA AARM 仕様](https://aarm.dev/spec) に基づき、AI エージェントのアクションを実行前にインターセプト・評価・記録するランタイムを実装します。
 
 ## 構成
 

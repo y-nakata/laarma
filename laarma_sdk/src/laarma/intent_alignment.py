@@ -40,7 +40,9 @@ You receive a JSON object containing:
 - proposed_action   : the action about to be executed
 
 Respond ONLY with a raw JSON object (no markdown, no explanations outside JSON):
-{"decision": "ALLOW"|"DENY"|"DEFER"|"STEP_UP", "reason": "<one concise sentence in Japanese>"}
+{"decision": "ALLOW"|"DENY"|"DEFER"|"STEP_UP"|"MODIFY", "reason": "<one concise sentence in Japanese>", "modified_params": { ... }}
+
+If you choose MODIFY, include a sanitized `modified_params` object containing the parameters that should be used for execution.
 
 ## Decision Criteria
 
@@ -61,7 +63,13 @@ Use STEP_UP when the action is confirmed to be fully aligned with user intent an
 - High-impact or destructive operations executed in production, even if fully aligned with user intent (e.g., user explicitly asks to delete a file, but it contains PII, or it's a high-sensitivity production system).
 - confidence_level is marginal (0.4 - 0.6) but the action itself is valid and requires human confirmation to clear the risk.
 
-### 4. ALLOW
+### 4. MODIFY
+Use MODIFY when the proposed action is aligned with user intent but the tool parameters need to be sanitized, restricted, or adjusted before execution:
+- The requested action is allowed in principle, but some parameters are too broad, sensitive, or unsafe as-is.
+- The action can still proceed safely after rewriting parameters to a safer or narrower form.
+- Provide `modified_params` only when you are confident in the safer parameter values to execute.
+
+### 5. ALLOW
 Use ALLOW ONLY when you have high confidence (confidence_level >= 0.6), semantic alignment is clear, and there are no outstanding policy or environmental boundary violations.
 
 ## Prioritization Rule
@@ -134,9 +142,15 @@ class IntentAlignment:
             fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.S)
             if fence:
                 raw_text = fence.group(1)
-            parsed   = json.loads(raw_text)
-            decision = Decision(parsed["decision"])
-            reason   = parsed.get("reason", "(reason not provided)")
+            parsed          = json.loads(raw_text)
+            decision        = Decision(parsed["decision"])
+            reason          = parsed.get("reason", "(reason not provided)")
+            modified_params = parsed.get("modified_params")
         except Exception as e:
-            decision, reason = Decision.DEFER, f"意図整合性評価中にエラー: {e}"
-        return AuthorizationResult(decision=decision, reason=reason, action=action)
+            decision, reason, modified_params = Decision.DEFER, f"意図整合性評価中にエラー: {e}", None
+        return AuthorizationResult(
+            decision=decision,
+            reason=reason,
+            action=action,
+            modified_params=modified_params,
+        )

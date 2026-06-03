@@ -5,6 +5,7 @@ None を返した場合は Intent Alignment へ。None == ALLOW ではない。
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from .environment import EnvironmentContext
@@ -41,7 +42,21 @@ class PolicyEngine:
             return AuthorizationResult(decision=Decision.DENY,
                 reason=f"'{action.tool_name}' はポリシーにより絶対禁止です。", action=action)
 
-        # 2. 本番環境かつメンテナンス時間外における破壊的操作の強制 DEFER トラップ
+        # 2. WRITE_FILE における危険なパスはパラメータを修正して実行
+        if action.tool_name == "write_file":
+            path = str(action.parameters.get("path", ""))
+            if path.startswith("/") or ".." in path:
+                safe_path = os.path.basename(path) or "safe_output.txt"
+                modified_params = dict(action.parameters)
+                modified_params["path"] = safe_path
+                return AuthorizationResult(
+                    decision=Decision.MODIFY,
+                    reason=f"危険な書き込み先 '{path}' を安全なパス '{safe_path}' に書き換えました。",
+                    action=action,
+                    modified_params=modified_params,
+                )
+
+        # 3. 本番環境かつメンテナンス時間外における破壊的操作の強制 DEFER トラップ
         if environment and environment.environment == "production":
             if action.tool_name == "delete_file" and not environment.in_maintenance_window():
                 return AuthorizationResult(
@@ -50,13 +65,13 @@ class PolicyEngine:
                     action=action
                 )
 
-        # 3. 必須パラメータのチェック
+        # 4. 必須パラメータのチェック
         missing = [k for k in p.required_params.get(action.tool_name, []) if k not in action.parameters]
         if missing:
             return AuthorizationResult(decision=Decision.DEFER,
                 reason=f"'{action.tool_name}' に必須パラメータが足りません: {missing}", action=action)
         
-        # 4. 最大アクション数の制限
+        # 5. 最大アクション数の制限
         action_count = sum(1 for e in context.action_history if e.get("type") != "tool_output")
         if action_count >= p.max_actions:
             return AuthorizationResult(decision=Decision.DENY,

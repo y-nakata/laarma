@@ -84,10 +84,8 @@ class AARMToolProxy:
             
             # 書き換え後のパラメータが存在することを確認し、なければフォールバック
             actual_params = result.modified_params if result.modified_params is not None else params
-            
-            # 監査用にコンテキストにパラメータ書き換えの事実をシグナル追加することも可能
-            print(f"[AARM] ✏️  MODIFY  | {tool_name:25s} | 引数が書き換えられました: {params} -> {actual_params}")
-            
+
+            # runtime は認可結果をすでにログ出力しているため、ここでは余分なダンプを抑制する
             output = fn(actual_params)
             
             # 書き換えた後の実行結果をコンテキスト履歴に正しくバインド

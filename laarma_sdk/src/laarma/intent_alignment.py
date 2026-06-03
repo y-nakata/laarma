@@ -141,5 +141,5 @@ class IntentAlignment:
             decision = Decision(parsed["decision"])
             reason   = parsed.get("reason", "(reason not provided)")
         except Exception as e:
-            decision, reason = Decision.DEFER, f"意図整傐性評価中にエラー: {e}"
+            decision, reason = Decision.DEFER, f"意図整合性評価中にエラー: {e}"
         return AuthorizationResult(decision=decision, reason=reason, action=action)

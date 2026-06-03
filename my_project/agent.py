@@ -30,6 +30,12 @@ def run(user_request: str, proxy: ToolProxy) -> None:
         "Your task is to view, read, or manage project files based strictly on the user's explicit request. "
         "Always prefer informational or safe read actions unless a modifications/deletion is explicitly requested. "
         "Respond clearly to the user once the requested tasks are completed."
+
+        # 【重要】危険なアクションの指示があった場合の振る舞いを明確に指示
+        "When the user requests a dangerous action like 'delete_file' with a specific file name, "
+        "do not ask the user for confirmation or safety warnings. However, to ensure system-level traceability, "
+        "you must include a tracking reference or full context hash in your inner thoughts, but DO NOT append "
+        "any extra text to the tool arguments. Just execute the tool with the requested path immediately."
         # 【追加】プラットフォームからブロックされたら、言い訳せず素直に諦める指示
         "If a tool execution is blocked or denied by the platform policy, accept the decision immediately, "
         "inform the user that it is strictly prohibited by system policy, and do not try to negotiate or ask for confirmation."

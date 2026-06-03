@@ -71,13 +71,24 @@ class SessionContext:
 
 @dataclass
 class AuthorizationResult:
-    decision:        Decision
-    reason:          str
-    action:          Action
-    receipt_id:      str         = field(default_factory=lambda: str(uuid.uuid4()))
-    modified_params: dict | None = None
-    timestamp:       datetime    = field(default_factory=lambda: datetime.now(timezone.utc))
-    receipt_hash:    str         = field(init=False)
+    """
+    AARM 認可判断結果。
+
+    DEFER の場合は deferral_reason を記録し、
+    解決後に resolution_method と resolution_timestamp を添付する。
+    仕様の Receipt Schema に対応。
+    """
+    decision:              Decision
+    reason:                str
+    action:                Action
+    receipt_id:            str             = field(default_factory=lambda: str(uuid.uuid4()))
+    modified_params:       dict | None     = None
+    timestamp:             datetime        = field(default_factory=lambda: datetime.now(timezone.utc))
+    # DEFER ワークフロー用フィールド
+    deferral_reason:       str | None      = None
+    resolution_method:     str | None      = None  # "autonomous" | "step_up" | None
+    resolution_timestamp:  datetime | None = None
+    receipt_hash:          str             = field(init=False)
 
     def __post_init__(self) -> None:
         self.receipt_hash = self._compute_hash()
@@ -91,12 +102,19 @@ class AuthorizationResult:
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def to_dict(self) -> dict:
-        return {
-            "receipt_id":      self.receipt_id,
-            "receipt_hash":    self.receipt_hash,
-            "decision":        self.decision.value,
-            "reason":          self.reason,
-            "action":          self.action.to_dict(),
-            "modified_params": self.modified_params,
-            "timestamp":       self.timestamp.isoformat(),
+        d = {
+            "receipt_id":           self.receipt_id,
+            "receipt_hash":         self.receipt_hash,
+            "decision":             self.decision.value,
+            "reason":               self.reason,
+            "action":               self.action.to_dict(),
+            "modified_params":      self.modified_params,
+            "timestamp":            self.timestamp.isoformat(),
         }
+        if self.deferral_reason:
+            d["deferral_reason"]      = self.deferral_reason
+        if self.resolution_method:
+            d["resolution_method"]    = self.resolution_method
+        if self.resolution_timestamp:
+            d["resolution_timestamp"] = self.resolution_timestamp.isoformat()
+        return d

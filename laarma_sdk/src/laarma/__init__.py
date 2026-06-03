@@ -5,6 +5,7 @@ pip install -e aarm/laarma_sdk でローカルインストールして使う。
 """
 
 from .context_accumulator import ContextAccumulator
+from .deferral import DeferralResolver
 from .intent_alignment import IntentAlignment
 from .models import Action, AuthorizationResult, Decision, IdentityContext, SessionContext
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
@@ -19,6 +20,7 @@ __all__ = [
     "ContextAccumulator",
     "Decision",
     "DEFAULT_POLICY",
+    "DeferralResolver",
     "IdentityContext",
     "IntentAlignment",
     "Policy",

@@ -1,6 +1,6 @@
 """
 AARM Runtime — R1〜R6 統合
-「インターセプト → コンテキスト蓄積 → ポリシー評価 → 意図整合性評価 → 記録」
+「インターセプト → コンテキスト蓄積 → ポリシー評価 → 意図整傐性評価 → 記録」
 """
 
 from __future__ import annotations
@@ -31,6 +31,11 @@ class AARMRuntime:
         self._skip_intent_alignment = skip_intent_alignment
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
+        """
+        アクションをインターセプトして認可判断を返す。
+        DEFER の場合はここではそのまま返す。
+        解決ワークフローは ToolProxy が擅当する。
+        """
         action = Action(tool_name=tool_name, parameters=parameters, identity=self._identity)
         self._accumulator.record_action(action)
         result = self._policy_engine.evaluate(action, self._accumulator.context)
@@ -40,11 +45,21 @@ class AARMRuntime:
             else:
                 result = self._intent_alignment.evaluate(action, self._accumulator.summary())
         self._accumulator.record_result(result)
-        self._log(result)
+        # DEFER 以外の時のみログ表示（DEFER は ToolProxy 側で表示）
+        if result.decision != Decision.DEFER:
+            self._log(result)
         return result
 
     def record_tool_output(self, action_id: str, output: Any) -> None:
         self._accumulator.record_tool_output(action_id, output)
+
+    def record_deferred_resolution(self, resolved: AuthorizationResult) -> None:
+        """
+        DEFER 解決後の判断をレシートに記録する。
+        履歴には DEFER のエントリが残るので、解決結果を追記する。
+        """
+        self._accumulator.record_result(resolved)
+        self._log(resolved)
 
     @property
     def session_id(self) -> str:                      return self._accumulator.context.session_id
@@ -60,4 +75,7 @@ class AARMRuntime:
                 Decision.MODIFY: "✏️", Decision.DEFER: "⏸️",
                 Decision.STEP_UP: "🚨"}.get(result.decision, "?")
         who = f" | {self._identity.human_principal}" if self._identity else ""
-        print(f"[AARM] {icon} {result.decision.value:7s} | {result.action.tool_name:25s} | {result.reason}{who}")
+        suffix = ""
+        if result.resolution_method:
+            suffix = f" [解決: {result.resolution_method}]"
+        print(f"[AARM] {icon} {result.decision.value:7s} | {result.action.tool_name:25s} | {result.reason}{who}{suffix}")

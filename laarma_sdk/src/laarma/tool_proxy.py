@@ -76,18 +76,18 @@ class AARMToolProxy:
             self._runtime.record_tool_output(result.action.action_id, output)
             return output
 
-       # 3. MODIFY（引数書き換え許可）処理
+        # 3. MODIFY（引数書き換え許可）処理
         if result.decision == Decision.MODIFY:
             fn = self._tools.get(tool_name)
             if fn is None:
                 raise KeyError(f"Tool '{tool_name}' not registered.")
-            
+
             # 書き換え後のパラメータが存在することを確認し、なければフォールバック
             actual_params = result.modified_params if result.modified_params is not None else params
 
             # runtime は認可結果をすでにログ出力しているため、ここでは余分なダンプを抑制する
             output = fn(actual_params)
-            
+
             # 書き換えた後の実行結果をコンテキスト履歴に正しくバインド
             self._runtime.record_tool_output(result.action.action_id, output)
             return output

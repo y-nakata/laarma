@@ -45,11 +45,14 @@ class AARMRuntime:
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """
         アクションをインターセプトして認可判断を返す。
-        DEFER の場合はここではそのまま返す。解決ワークフローは ToolProxy が擅当。
+        DEFER の場合はここではそのまま返す。解決ワークフローは ToolProxy が担当。
         """
         action = Action(tool_name=tool_name, parameters=parameters, identity=self._identity)
         self._accumulator.record_action(action)
-        result = self._policy_engine.evaluate(action, self._accumulator.context)
+
+        # PolicyEngineのevaluate呼び出しに環境コンテキストを追加で渡す
+        result = self._policy_engine.evaluate(action, self._accumulator.context, self._environment)
+
         if result is None:
             if self._skip_intent_alignment:
                 result = AuthorizationResult(decision=Decision.ALLOW, reason="ポリシー通過。", action=action)

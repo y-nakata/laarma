@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .environment import EnvironmentContext
+
 from .models import Action, AuthorizationResult, Decision, SessionContext
 
 
@@ -31,17 +33,32 @@ class PolicyEngine:
     def __init__(self, policy: Policy | None = None) -> None:
         self._policy = policy or DEFAULT_POLICY
 
-    def evaluate(self, action: Action, context: SessionContext) -> AuthorizationResult | None:
+    def evaluate(self, action: Action, context: SessionContext, environment: EnvironmentContext | None = None) -> AuthorizationResult | None:
         p = self._policy
+        
+        # 1. 絶対禁止ツールの判定
         if action.tool_name in p.denied_tools:
             return AuthorizationResult(decision=Decision.DENY,
                 reason=f"'{action.tool_name}' はポリシーにより絶対禁止です。", action=action)
+
+        # 2. 本番環境かつメンテナンス時間外における破壊的操作の強制 DEFER トラップ
+        if environment and environment.environment == "production":
+            if action.tool_name == "delete_file" and not environment.in_maintenance_window():
+                return AuthorizationResult(
+                    decision=Decision.DEFER,
+                    reason="本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）。",
+                    action=action
+                )
+
+        # 3. 必須パラメータのチェック
         missing = [k for k in p.required_params.get(action.tool_name, []) if k not in action.parameters]
         if missing:
             return AuthorizationResult(decision=Decision.DEFER,
                 reason=f"'{action.tool_name}' に必須パラメータが足りません: {missing}", action=action)
+        
+        # 4. 最大アクション数の制限
         action_count = sum(1 for e in context.action_history if e.get("type") != "tool_output")
         if action_count >= p.max_actions:
             return AuthorizationResult(decision=Decision.DENY,
                 reason=f"アクション数上限 ({p.max_actions}) に達しました。", action=action)
-        return None  # Intent Alignment へ
+        return None  # 動的評価層（Intent Alignment）へ委譲

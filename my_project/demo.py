@@ -57,7 +57,7 @@ def run_scenario(
     ctx = runtime.context_summary
     sig = ctx.get("derived_signals", {})
     sd  = sig.get("semantic_distance", {})
-    print(f"\n  「「「 AARM サマリ 》》》")
+    print(f"\n  《《《 AARM サマリ 》》》")
     print(f"  総アクション数    : {ctx['action_count']}")
     print(f"  確信度          : {sig.get('confidence_level', '-')}")
     print(f"  データ分類        : {sig.get('data_classifications', [])}")

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -40,7 +41,8 @@ You receive:
 - proposed_action: the action pending execution
 - additional_context: supplementary information gathered after deferral
 
-Respond ONLY with JSON: {"decision": "ALLOW"|"DENY"|"STEP_UP", "reason": "<one sentence in Japanese>"}
+Respond ONLY with a raw JSON object (do not wrap in markdown block quotes, do not include pre-text, post-text, or explanations):
+{"decision": "ALLOW"|"DENY"|"STEP_UP", "reason": "<one sentence in Japanese>"}
 
 Note: Do NOT return DEFER again. You must reach a conclusion.
 - ALLOW  : additional context confirms the action aligns with intent
@@ -111,6 +113,22 @@ class DeferralResolver:
             )
             text_parts = [b.text for b in resp.content if hasattr(b, "text") and b.text]
             raw = "\n".join(text_parts).strip()
+
+            # Markdownのコードブロック（```json ... ```）を検出するための正規表現
+            # システムパーサーの誤認を防ぐため、3連続のバックティックを動的に組み立てます
+            bt = "`" * 3
+            pattern = rf"{bt}(?:json)?\s*(\{{.*?\}})\s*{bt}"
+            
+            fence = re.search(pattern, raw, re.S)
+            if fence:
+                raw = fence.group(1).strip()
+            else:
+                # LLMが前置きを入れて出力してしまった場合のフォールバック（最初の { と最後の } を探す）
+                start = raw.find('{')
+                end = raw.rfind('}')
+                if start != -1 and end != -1:
+                    raw = raw[start:end+1].strip()
+            
             parsed   = json.loads(raw)
             decision = Decision(parsed["decision"])
             reason   = parsed.get("reason", "(reason not provided)")

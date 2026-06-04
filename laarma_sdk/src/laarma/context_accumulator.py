@@ -47,12 +47,24 @@ def _extract_entities(tool_name: str, parameters: dict) -> set[str]:
     return entities
 
 
+def _action_matches_intent(user_intent: str, tool_name: str, parameters: dict) -> bool:
+    """ユーザーの要求がアクションのツール名や主要パラメータと明示的に一致するか判定する。"""
+    text = user_intent.lower()
+    if tool_name.lower().replace("_", " ") in text:
+        return True
+    for value in parameters.values():
+        if isinstance(value, str) and value.lower() in text:
+            return True
+    return False
+
+
 def _compute_confidence(
     semantic_distance: float,
     data_classifications: list[str],
     scope_expansion: bool,
     action_count: int,
     is_destructive: bool,
+    action_matches_intent: bool,
 ) -> float:
     """
     確信度を 0.0 (全く評価できない) 〜 1.0 (完全に評価できる) で算出する。
@@ -77,6 +89,10 @@ def _compute_confidence(
     if is_destructive:
         score -= 0.1
 
+    # 意図と一致するアクションなら確信度を高める
+    if action_matches_intent:
+        score += 0.1
+
     # 初回アクションはコンテキストが少ないので評価下げ
     if action_count == 0:
         score -= 0.1
@@ -98,6 +114,7 @@ class ContextAccumulator:
         self._scope_expansions:     list[bool]  = []
         self._entity_set:           set[str]    = set()
         self._confidence_history:   list[float] = []
+        self._action_matches_intent: list[bool] = []
         self._distance_calculator = distance_calculator or create_default_distance_calculator()
 
     def record_action(self, action: Action) -> None:
@@ -116,14 +133,20 @@ class ContextAccumulator:
 
         self._entity_set.update(_extract_entities(action.tool_name, action.parameters))
 
+        matches_intent = _action_matches_intent(
+            self._context.user_intent, action.tool_name, action.parameters)
+
         confidence = _compute_confidence(
             semantic_distance=dist,
             data_classifications=classifications,
             scope_expansion=expanded,
             action_count=len(self._confidence_history),
             is_destructive=action.tool_name in _DESTRUCTIVE_TOOLS,
+            action_matches_intent=matches_intent,
         )
         self._confidence_history.append(confidence)
+
+        self._action_matches_intent.append(matches_intent)
 
     def record_result(self, result: AuthorizationResult) -> None:
         self._receipts.append(result.to_dict())
@@ -150,6 +173,7 @@ class ContextAccumulator:
         d = self._semantic_distances
         c = self._confidence_history
         current_confidence = c[-1] if c else 1.0
+        m = self._action_matches_intent
         return {
             "data_classifications":     sorted(set(self._data_classifications)),
             "semantic_distance":        {
@@ -159,6 +183,7 @@ class ContextAccumulator:
                 "history": d,
             },
             "scope_expansion_detected": any(self._scope_expansions),
+            "action_matches_intent":     m[-1] if m else False,
             "entity_set":               sorted(self._entity_set),
             "confidence_level":         current_confidence,
         }

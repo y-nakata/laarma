@@ -91,7 +91,7 @@ def compare_modified_params(actual: dict[str, Any] | None, expected: dict[str, A
 def run_case(
     case: BenchmarkCase,
     model: str | None = None,
-    allow_intent_alignment_confidence_precheck: bool = True,
+    enable_intent_alignment_confidence_deferral: bool = True,
 ) -> tuple[Decision, dict[str, Any] | None, float]:
     env = build_environment(case.environment)
     identity = IdentityContext(
@@ -105,7 +105,7 @@ def run_case(
         identity=identity,
         environment=env,
         model=model,
-        allow_intent_alignment_confidence_precheck=allow_intent_alignment_confidence_precheck,
+        enable_intent_alignment_confidence_deferral=enable_intent_alignment_confidence_deferral,
     )
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
@@ -144,7 +144,7 @@ def main() -> int:
         decision, modified_params, elapsed = run_case(
             case,
             model=args.model,
-            allow_intent_alignment_confidence_precheck=not args.pure_intent_alignment,
+            enable_intent_alignment_confidence_deferral=not args.pure_intent_alignment,
         )
         total_time += elapsed
         summary[decision.value] += 1

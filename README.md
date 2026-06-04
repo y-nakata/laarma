@@ -58,7 +58,15 @@ python aarm/my_project/benchmark.py
 python aarm/my_project/benchmark.py --model claude-sonnet-4-6
 ```
 
-ベンチマークは各ケースの判断結果と処理時間を出力し、期待値との不一致を検出します。
+`--pure-intent-alignment` を指定すると、IntentAlignment 内の決定的事前チェックを無効化し、純粋な LLM 判定に近い挙動をベンチマークできます。
+
+```bash
+python aarm/my_project/benchmark.py --pure-intent-alignment
+```
+
+このモードは探索的評価向けです。既存の期待値ファイルは通常モード（rule+LLM ハイブリッド）を前提としているため、不一致は情報として出力されますが、非ゼロ終了にはなりません。
+
+ベンチマークは各ケースの判断結果と処理時間を出力します。
 
 ## デモシナリオ
 

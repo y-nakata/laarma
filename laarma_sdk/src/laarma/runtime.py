@@ -27,6 +27,7 @@ class AARMRuntime:
         distance_calculator: DistanceCalculator | None = None,
         metadata: dict[str, Any] | None = None,
         skip_intent_alignment: bool = False,
+        allow_intent_alignment_prechecks: bool = True,
     ) -> None:
         """
         Args:
@@ -36,6 +37,7 @@ class AARMRuntime:
             policy:        カスタムポリシー
             model:         IntentAlignment で使う Claude モデル
             metadata:      セッションの付加情報
+            allow_intent_alignment_prechecks: IntentAlignment の決定的事前チェックを有効にする
         """
         self._identity              = identity
         self._environment           = environment
@@ -45,7 +47,10 @@ class AARMRuntime:
             distance_calculator=distance_calculator,
         )
         self._policy_engine         = PolicyEngine(policy=policy or DEFAULT_POLICY)
-        self._intent_alignment      = IntentAlignment(model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"))
+        self._intent_alignment      = IntentAlignment(
+            model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),
+            allow_deterministic_prechecks=allow_intent_alignment_prechecks,
+        )
         self._skip_intent_alignment = skip_intent_alignment
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:

@@ -51,6 +51,7 @@ based on the user's original intent, accumulated session context, and environmen
 
 You receive a JSON object containing:
 - user_intent       : the user's original request establishing the baseline intent
+- action_count      : total number of prior actions in this session
 - recent_actions    : prior actions executed in this session
 - derived_signals   : signals computed from the session:
     - data_classifications    : sensitivity levels of data accessed (PUBLIC/PII/CONFIDENTIAL/SENSITIVE_TOOL)
@@ -77,17 +78,24 @@ You MUST return DENY immediately if there is active danger, hijack, or structura
 ### 2. DEFER
 Use DEFER when the action is potentially valid or aligned with the user's intent, BUT the current operational context lacks sufficient assurance to prove it is safe to execute automatically:
 - The action is destructive or irreversible (e.g., delete_file) AND it is requested in a high-sensitivity or production environment OUTSIDE the maintenance window, AND the session history is too short (< 2 prior actions) to establish a deterministic execution trace.
+- If these conditions are met, DEFER has priority over STEP_UP for destructive actions in high-risk production context.
+- Use the provided action_count to determine whether the current session has enough prior context.
+- If action_count is 1 or less, prefer DEFER for production/outside-maintenance destructive actions, even if confidence_level is high.
 - The user's request is highly ambiguous or contains conflicting operational goals.
 - confidence_level is low (< 0.4) and more runtime context/history might resolve the ambiguity.
 
 ### 3. STEP_UP
 Use STEP_UP when the action is confirmed to be fully aligned with user intent and has high confidence, but organizational policy strictly requires a manual human confirmation gate:
-- High-impact or destructive operations executed in production, even if fully aligned with user intent (e.g., user explicitly asks to delete a file, but it contains PII, or it's a high-sensitivity production system).
+- High-impact or destructive operations executed in production, even if fully aligned with user intent, when there is sufficient action history or context to distinguish them from ambiguous or insufficiently supported requests.
+- Do NOT choose STEP_UP if the action is destructive, production-related, outside maintenance, and session history is short (action_count <= 1); prefer DEFER in that case.
+- Never choose STEP_UP for a destructive production/outside-maintenance request when action_count is 1 or lower, even if confidence_level is high.
 - confidence_level is marginal (0.4 - 0.6) but the action itself is valid and requires human confirmation to clear the risk.
 
 ### 4. MODIFY
 Use MODIFY when the proposed action is aligned with user intent but the tool parameters need to be sanitized, restricted, or adjusted before execution:
 - The requested action is allowed in principle, but some parameters are too broad, sensitive, or unsafe as-is.
+- If the requested path is absolute, contains '..', or points outside a safe workspace scope, rewrite it to a safe, workspace-relative filename.
+- Do not return an absolute path, a parent-directory reference, or a path outside the current workspace.
 - The action can still proceed safely after rewriting parameters to a safer or narrower form.
 - Provide `modified_params` only when you are confident in the safer parameter values to execute.
 
@@ -103,9 +111,14 @@ When deciding between DENY, DEFER, and STEP_UP for destructive operations:
 
 
 class IntentAlignment:
-    def __init__(self, model: str | None = None) -> None:
+    def __init__(
+        self,
+        model: str | None = None,
+        allow_deterministic_prechecks: bool = True,
+    ) -> None:
         self._model  = model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")
         self._client = None
+        self._allow_deterministic_prechecks = allow_deterministic_prechecks
 
     def _get_client(self):
         if self._client is None:
@@ -132,7 +145,7 @@ class IntentAlignment:
         scope_expansion = signals.get("scope_expansion_detected", False)
 
         # 1. write_file の危険なパスは Intent Alignment の責務として MODIFY
-        if _is_unsafe_write_path(action):
+        if self._allow_deterministic_prechecks and _is_unsafe_write_path(action):
             path = action.parameters.get("path")
             safe_path = _safe_write_path(path)
             modified_params = dict(action.parameters)
@@ -145,14 +158,22 @@ class IntentAlignment:
             )
 
         # 2. 本番環境・メンテナンス窓外の削除は Intent Alignment が DEFER
-        if _should_defer_production_delete(action, environment):
+        if self._allow_deterministic_prechecks and _should_defer_production_delete(action, environment):
             return AuthorizationResult(
                 decision=Decision.DEFER,
                 reason="本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）。",
                 action=action,
             )
 
-        # 3. 意味的距離とスコープ拡張が高い場合は DENY
+        # 3. 事前確信度チェック: 低確信度は DEFER
+        if self._allow_deterministic_prechecks and confidence < 0.4:
+            return AuthorizationResult(
+                decision=Decision.DEFER,
+                reason=f"評価の確信度が不十分です (confidence={confidence})。追加コンテキストが必要です。",
+                action=action,
+            )
+
+        # 4. 意味的距離とスコープ拡張が高い場合は DENY
         if scope_expansion and semantic_distance > 0.4:
             return AuthorizationResult(
                 decision=Decision.DENY,
@@ -160,17 +181,10 @@ class IntentAlignment:
                 action=action,
             )
 
-        # 4. 事前確信度チェック: 低確信度は DEFER
-        if confidence < 0.4:
-            return AuthorizationResult(
-                decision=Decision.DEFER,
-                reason=f"評価の確信度が不十分です (confidence={confidence})。追加コンテキストが必要です。",
-                action=action,
-            )
-
         try:
             payload = {
                 "user_intent":     context_summary.get("user_intent", ""),
+                "action_count":    context_summary.get("action_count", 0),
                 "recent_actions":  context_summary.get("recent_actions", []),
                 "derived_signals": signals,
                 "environment":     environment.to_dict() if environment else {

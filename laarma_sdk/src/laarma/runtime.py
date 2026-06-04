@@ -75,8 +75,7 @@ class AARMRuntime:
                     self._environment,
                 )
         self._accumulator.record_result(result)
-        if result.decision != Decision.DEFER:
-            self._log(result)
+        self._log(result)
         return result
 
     def record_tool_output(self, action_id: str, output: Any) -> None:

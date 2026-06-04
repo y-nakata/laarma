@@ -58,7 +58,6 @@ class AARMToolProxy:
 
         # 1. DEFER（保留）処理
         if result.decision == Decision.DEFER:
-            print(f"[AARM] ⏸️  DEFER   | {tool_name:25s} | {result.reason}")
             print(f"[AARM] 🔄 自律解決を試みる...")
             resolved = self._resolver.resolve(
                 deferred_result=result,

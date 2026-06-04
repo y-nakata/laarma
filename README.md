@@ -71,13 +71,18 @@ python aarm/my_project/demo.py
 実ツール実行 or ToolBlocked 例外
 ```
 
-## 試作上の制約と既知の課題
+## 現状と今後の課題
 
-AARM 仕様では MODIFY・DEFER を含む全ての動的判断は Intent Alignment（Claude による文脈評価）の責務です。しかしこの試作では `context_accumulator.py` の派生シグナル計算（`semantic_distance` / `confidence_level`）がキーワードマッチ + Jaccard 距離という簡易実装にとどまっており、Intent Alignment への入力シグナルの精度が実用レベルに達していません。
+### 実装ステータス
 
-そのため以下の判断を `policy_engine.py` に静的フックとして実装することでデモの安定動作を確保しています：
+AARM 仕様（R1〜R6）の構造・設計思想・処理フローは仕様に沿って実装済みです。
+本リポジトリは**検証段階の試作実装**であり、仕様準拠の動作確認を目的としています。
 
-- **MODIFY**: `write_file` の危険パス検出と書き換え（本来は Intent Alignment の責務）
-- **DEFER**: 本番・メンテナンス窓外での破壊的操作の保留（本来は Intent Alignment の責務）
+### 既知の最適化課題
 
-根本的な解決には `semantic_distance` を文埋め込みモデルで計算するなど派生シグナルの精度向上が必要です。これは AARM 仕様 Section VIII でもオープンリサーチ課題として言及されています。
+Intent Alignment に渡す派生シグナル（`semantic_distance` / `confidence_level`）の計算を、現状はキーワードマッチ + Jaccard 距離で代替しています。この精度不足を補うため、本来 Intent Alignment の責務である以下の判断を `policy_engine.py` に静的フックとして実装しています：
+
+- **MODIFY**: `write_file` の危険パス検出と書き換え
+- **DEFER**: 本番・メンテナンス窓外での破壊的操作の保留
+
+市場には AARM 準拠の製品が複数存在しており、この精度問題は仕様に起因する未解決課題ではなく、**本実装における特定の最適化の欠落**です。先行製品がどのようなアプローチ（埋め込みモデルの選定・学習データ・ヒューリスティックの組み合わせ）でこの精度を担保しているかを調査し、実装に反映することが次のステップです。

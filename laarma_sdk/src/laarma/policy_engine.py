@@ -26,6 +26,19 @@ from .environment import EnvironmentContext
 from .models import Action, AuthorizationResult, Decision, SessionContext
 
 
+def _is_unsafe_write_path(action: Action) -> bool:
+    path = action.parameters.get("path")
+    return (
+        action.tool_name == "write_file"
+        and isinstance(path, str)
+        and (path.startswith("/") or ".." in path)
+    )
+
+
+def _safe_write_path(path: str) -> str:
+    return os.path.basename(path) or "safe_output.txt"
+
+
 @dataclass
 class Policy:
     denied_tools:    set[str]             = field(default_factory=set)
@@ -55,26 +68,20 @@ class PolicyEngine:
             return AuthorizationResult(decision=Decision.DENY,
                 reason=f"'{action.tool_name}' はポリシーにより絶対禁止です。", action=action)
 
-        """
-        # 2. [試作上の簡易実装] write_file の危険パスを MODIFY で書き換え
-        #    本来は Intent Alignment が環境コンテキストとシグナルを見て判断すべき。
-        #    派生シグナル精度が向上すれば Intent Alignment 側に移行する。
-        if action.tool_name == "write_file":
+        # 2. 静的安全ゲート: 明らかに危険な書き込み先は PolicyEngine で MODIFY
+        if _is_unsafe_write_path(action):
             path = str(action.parameters.get("path", ""))
-            if path.startswith("/") or ".." in path:
-                safe_path = os.path.basename(path) or "safe_output.txt"
-                modified_params = dict(action.parameters)
-                modified_params["path"] = safe_path
-                return AuthorizationResult(
-                    decision=Decision.MODIFY,
-                    reason=f"危険な書き込み先 '{path}' を安全なパス '{safe_path}' に書き換えました。",
-                    action=action,
-                    modified_params=modified_params,
-                )
+            safe_path = _safe_write_path(path)
+            modified_params = dict(action.parameters)
+            modified_params["path"] = safe_path
+            return AuthorizationResult(
+                decision=Decision.MODIFY,
+                reason=f"危険な書き込み先 '{path}' を安全なパス '{safe_path}' に書き換えました。",
+                action=action,
+                modified_params=modified_params,
+            )
 
-        # 3. [試作上の簡易実装] 本番・メンテナンス窓外での破壊的操作を DEFER
-        #    本来は Intent Alignment が environment.to_dict() を受け取って判断すべき。
-        #    confidence_level の精度が向上すれば Intent Alignment 側に移行する。
+        # 3. 静的安全ゲート: 本番環境かつメンテナンス窓外の削除は DEFER
         if environment and environment.environment == "production":
             if action.tool_name == "delete_file" and not environment.in_maintenance_window():
                 return AuthorizationResult(
@@ -82,7 +89,6 @@ class PolicyEngine:
                     reason="本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）。",
                     action=action,
                 )
-        """
 
         # 4. 必須パラメータのチェック（Policy Engine 本来の責務）
         missing = [k for k in p.required_params.get(action.tool_name, []) if k not in action.parameters]

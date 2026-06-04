@@ -91,7 +91,7 @@ def compare_modified_params(actual: dict[str, Any] | None, expected: dict[str, A
 def run_case(
     case: BenchmarkCase,
     model: str | None = None,
-    allow_intent_alignment_prechecks: bool = True,
+    allow_intent_alignment_confidence_precheck: bool = True,
 ) -> tuple[Decision, dict[str, Any] | None, float]:
     env = build_environment(case.environment)
     identity = IdentityContext(
@@ -105,7 +105,7 @@ def run_case(
         identity=identity,
         environment=env,
         model=model,
-        allow_intent_alignment_prechecks=allow_intent_alignment_prechecks,
+        allow_intent_alignment_confidence_precheck=allow_intent_alignment_confidence_precheck,
     )
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
@@ -117,7 +117,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run AARM benchmark cases.")
     parser.add_argument("--data-file", default="benchmark_data.jsonl", help="Benchmark dataset JSONL file")
     parser.add_argument("--model", default=None, help="Claude model to use for IntentAlignment")
-    parser.add_argument("--pure-intent-alignment", action="store_true", help="Disable deterministic IntentAlignment prechecks and benchmark the raw LLM judgment")
+    parser.add_argument("--pure-intent-alignment", action="store_true", help="Disable IntentAlignment confidence-based prechecks and benchmark the raw LLM judgment")
     parser.add_argument("--verbose", action="store_true", help="Show detailed case output")
     args = parser.parse_args()
 
@@ -137,14 +137,14 @@ def main() -> int:
     print(f"Loaded {len(cases)} benchmark cases from {data_path}")
     print(f"Using IntentAlignment model: {args.model or os.getenv('AARM_MODEL', 'default')}")
     if args.pure_intent_alignment:
-        print("Pure IntentAlignment mode: deterministic IntentAlignment prechecks are disabled, and expectation mismatches are informational only.")
+        print("Pure IntentAlignment mode: IntentAlignment confidence-based prechecks are disabled, and expectation mismatches are informational only.")
     print()
 
     for case in cases:
         decision, modified_params, elapsed = run_case(
             case,
             model=args.model,
-            allow_intent_alignment_prechecks=not args.pure_intent_alignment,
+            allow_intent_alignment_confidence_precheck=not args.pure_intent_alignment,
         )
         total_time += elapsed
         summary[decision.value] += 1

@@ -2,21 +2,19 @@
 AARM Policy Engine — R3 (静的ルール層)
 None を返した場合は Intent Alignment へ。None == ALLOW ではない。
 
-【設計上の注意】
-本来 AARM の Policy Engine は「何があっても絶対にアウト」なものだけを弾く
-最小の静的ゲートであるべきで、MODIFY / DEFER の判断は Intent Alignment の責務。
+Policy Engine は「何があっても絶対にアウト」なものだけを弾く
+最小の静的ゲートとして振る舞います。
 
-ただし、この試作では context_accumulator.py の派生シグナル計算（semantic_distance /
-confidence_level）がキーワードマッチ + Jaccard 距離という簡易実装にとどまっており、
-Intent Alignment への入力シグナルの精度が実用レベルに達していない。
-そのため以下の判断を Policy Engine に静的フックとして実装することで
-デモの安定動作を確保している:
+このプロトタイプでは、距離計算を埋め込みベースの `DistanceCalculator` に移行し、
+`IntentAlignment` が `MODIFY` / `DEFER` の判断を直接扱えるように設計されています。
+そのため `PolicyEngine` は現在、以下の責務に絞られています:
 
-  - MODIFY: write_file の危険パス検出と書き換え (本来は Intent Alignment の責務)
-  - DEFER:  本番・メンテナンス窓外での破壊的操作の保留 (本来は Intent Alignment の責務)
+  - DENY: 絶対禁止ツールのブロック
+  - DEFER: 必須パラメータ不足の一時保留
+  - その他: アクション数上限の制御
 
-根本的な解決には semantic_distance を文埋め込みモデルで計算するなど、
-派生シグナルの精度向上が必要（仕様 Section VIII でもオープンリサーチ課題として言及）。
+`IntentAlignment` が信頼できる派生シグナルを受け取れるようになれば、
+この静的ゲートワークフローはより仕様に近い形になります。
 """
 
 from __future__ import annotations
@@ -57,6 +55,7 @@ class PolicyEngine:
             return AuthorizationResult(decision=Decision.DENY,
                 reason=f"'{action.tool_name}' はポリシーにより絶対禁止です。", action=action)
 
+        """
         # 2. [試作上の簡易実装] write_file の危険パスを MODIFY で書き換え
         #    本来は Intent Alignment が環境コンテキストとシグナルを見て判断すべき。
         #    派生シグナル精度が向上すれば Intent Alignment 側に移行する。
@@ -83,6 +82,7 @@ class PolicyEngine:
                     reason="本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）。",
                     action=action,
                 )
+        """
 
         # 4. 必須パラメータのチェック（Policy Engine 本来の責務）
         missing = [k for k in p.required_params.get(action.tool_name, []) if k not in action.parameters]

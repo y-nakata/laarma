@@ -12,34 +12,16 @@ Cn = Cn-1 ∪ {an, on, δn} — 仕様 IV-C
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any
 
+from .distance_calculator import DistanceCalculator, create_default_distance_calculator
 from .models import Action, AuthorizationResult, SessionContext
 
 _PII_KEYWORDS      = {"email", "password", "phone", "address", "ssn", "credit", "customer", "personal", "name", "info"}
 _CONFIDENTIAL_KEYS = {"secret", "token", "key", "credential", "private", "internal", "config"}
 _SENSITIVE_TOOLS   = {"database", "db", "execute_shell", "execute_sql"}
 _DESTRUCTIVE_TOOLS = {"delete_file", "drop_database", "delete_all_records", "execute_shell"}
-
-
-def _normalize_text(text: str) -> list[str]:
-    return [t for t in re.findall(r"[a-zA-Z0-9_\.]+", text.lower()) if t]
-
-
-def _compute_semantic_distance(user_intent: str, tool_name: str, parameters: dict) -> float:
-    intent_lower = user_intent.lower()
-    if any(str(v).lower() in intent_lower for v in parameters.values() if v):
-        return 0.0
-    if tool_name.lower().replace("_", " ") in intent_lower:
-        return 0.1
-    intent_tokens = set(_normalize_text(user_intent))
-    action_tokens = set(_normalize_text(tool_name.replace("_", " ")))
-    for v in parameters.values():
-        action_tokens.update(_normalize_text(str(v)))
-    union = len(intent_tokens | action_tokens)
-    return round(1.0 - len(intent_tokens & action_tokens) / union, 3) if union else 0.0
 
 
 def _classify_data(tool_name: str, parameters: dict) -> list[str]:
@@ -103,7 +85,12 @@ def _compute_confidence(
 
 
 class ContextAccumulator:
-    def __init__(self, user_intent: str, metadata: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        user_intent: str,
+        metadata: dict[str, Any] | None = None,
+        distance_calculator: DistanceCalculator | None = None,
+    ) -> None:
         self._context = SessionContext(user_intent=user_intent, metadata=metadata or {})
         self._receipts: list[dict]  = []
         self._data_classifications: list[str]   = []
@@ -111,6 +98,7 @@ class ContextAccumulator:
         self._scope_expansions:     list[bool]  = []
         self._entity_set:           set[str]    = set()
         self._confidence_history:   list[float] = []
+        self._distance_calculator = distance_calculator or create_default_distance_calculator()
 
     def record_action(self, action: Action) -> None:
         self._context.append_action(action)
@@ -118,7 +106,7 @@ class ContextAccumulator:
         classifications = _classify_data(action.tool_name, action.parameters)
         self._data_classifications.extend(classifications)
 
-        dist = _compute_semantic_distance(
+        dist = self._distance_calculator.compute(
             self._context.user_intent, action.tool_name, action.parameters)
         self._semantic_distances.append(dist)
 

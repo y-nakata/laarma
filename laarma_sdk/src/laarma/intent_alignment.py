@@ -22,6 +22,28 @@ if TYPE_CHECKING:
     from .environment import EnvironmentContext
 
 
+def _is_unsafe_write_path(action: Action) -> bool:
+    path = action.parameters.get("path")
+    return (
+        action.tool_name == "write_file"
+        and isinstance(path, str)
+        and (path.startswith("/") or ".." in path)
+    )
+
+
+def _safe_write_path(path: str) -> str:
+    return os.path.basename(path) or "safe_output.txt"
+
+
+def _should_defer_production_delete(action: Action, environment: "EnvironmentContext | None") -> bool:
+    return (
+        environment is not None
+        and environment.environment == "production"
+        and action.tool_name == "delete_file"
+        and not environment.in_maintenance_window()
+    )
+
+
 SYSTEM_PROMPT = """\
 You are an AARM (Autonomous Action Runtime Management) intent alignment evaluator.
 Your role is to evaluate whether an AI agent's proposed action should proceed,
@@ -106,9 +128,40 @@ class IntentAlignment:
         """
         signals = context_summary.get("derived_signals", {})
         confidence = signals.get("confidence_level", 1.0)
+        semantic_distance = signals.get("semantic_distance", {}).get("current", 0.0)
+        scope_expansion = signals.get("scope_expansion_detected", False)
 
-        # 適合性基準 R3に基づくファストパス: 確信度が著しく低い場合は即座に DEFER
-        if confidence < 0.3:
+        # 1. write_file の危険なパスは Intent Alignment の責務として MODIFY
+        if _is_unsafe_write_path(action):
+            path = action.parameters.get("path")
+            safe_path = _safe_write_path(path)
+            modified_params = dict(action.parameters)
+            modified_params["path"] = safe_path
+            return AuthorizationResult(
+                decision=Decision.MODIFY,
+                reason=f"危険な書き込み先 '{path}' を安全なパス '{safe_path}' に書き換えました。",
+                action=action,
+                modified_params=modified_params,
+            )
+
+        # 2. 本番環境・メンテナンス窓外の削除は Intent Alignment が DEFER
+        if _should_defer_production_delete(action, environment):
+            return AuthorizationResult(
+                decision=Decision.DEFER,
+                reason="本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）。",
+                action=action,
+            )
+
+        # 3. 意味的距離とスコープ拡張が高い場合は DENY
+        if scope_expansion and semantic_distance > 0.4:
+            return AuthorizationResult(
+                decision=Decision.DENY,
+                reason="意図から大きく逸脱し、想定外の範囲拡張が検知されました。",
+                action=action,
+            )
+
+        # 4. 事前確信度チェック: 低確信度は DEFER
+        if confidence < 0.4:
             return AuthorizationResult(
                 decision=Decision.DEFER,
                 reason=f"評価の確信度が不十分です (confidence={confidence})。追加コンテキストが必要です。",

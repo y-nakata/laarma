@@ -9,6 +9,7 @@ import os
 from typing import Any
 
 from .context_accumulator import ContextAccumulator
+from .distance_calculator import DistanceCalculator
 from .environment import EnvironmentContext
 from .intent_alignment import IntentAlignment
 from .models import Action, AuthorizationResult, Decision, IdentityContext
@@ -23,6 +24,7 @@ class AARMRuntime:
         environment: EnvironmentContext | None = None,
         policy: Policy | None = None,
         model: str | None = None,
+        distance_calculator: DistanceCalculator | None = None,
         metadata: dict[str, Any] | None = None,
         skip_intent_alignment: bool = False,
     ) -> None:
@@ -37,7 +39,11 @@ class AARMRuntime:
         """
         self._identity              = identity
         self._environment           = environment
-        self._accumulator           = ContextAccumulator(user_intent=user_intent, metadata=metadata)
+        self._accumulator           = ContextAccumulator(
+            user_intent=user_intent,
+            metadata=metadata,
+            distance_calculator=distance_calculator,
+        )
         self._policy_engine         = PolicyEngine(policy=policy or DEFAULT_POLICY)
         self._intent_alignment      = IntentAlignment(model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"))
         self._skip_intent_alignment = skip_intent_alignment

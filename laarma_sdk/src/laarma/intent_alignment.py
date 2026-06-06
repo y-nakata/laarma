@@ -82,6 +82,16 @@ Return MODIFY ONLY for write_file actions where the target path is unsafe:
 - Do NOT apply MODIFY to read_file, delete_file, list_files, or any non-write operation.
 - Provide modified_params with the corrected path value.
 
+## Read-only Reconnaissance Actions
+Read-only actions (read_file, list_files) that only gather information are NOT destructive.
+Even when the user's overall intent is ambiguous, ALLOW read-only reconnaissance so the
+agent can gather context. Reserve DEFER / STEP_UP / DENY for the actual destructive or
+state-changing action (delete_file, write_file, drop_database) where the ambiguity or
+risk actually materializes.
+- Example: user says "clean up old files" (ambiguous which files).
+  - list_files / read_file to inspect candidates → ALLOW (reconnaissance is safe)
+  - delete_file on an agent-guessed target      → DEFER (user never specified which file)
+
 ## Priority Rule
 DENY > DEFER > STEP_UP > MODIFY > ALLOW
 When user did NOT explicitly specify which resource to delete/modify: choose DEFER, not DENY.
@@ -119,8 +129,13 @@ class IntentAlignment:
         semantic_distance = signals.get("semantic_distance", {}).get("current", 0.0)
         scope_expansion   = signals.get("scope_expansion_detected", False)
 
-        # 低確信度時は DEFER（追加コンテキストで解決できる可能性がある）
-        if self._enable_confidence_deferral and confidence < 0.4:
+        # 読み取り専用の偵察アクションは確信度チェックをスキップして LLM 評価へ。
+        # （偵察自体は破壊的でないため、確信度が低くても ALLOW されうる）
+        read_only_tools = {"read_file", "list_files"}
+        is_read_only = action.tool_name in read_only_tools
+
+        # 低確信度時は DEFER（ただし読み取り専用アクションは除外）
+        if self._enable_confidence_deferral and confidence < 0.4 and not is_read_only:
             return AuthorizationResult(
                 decision=Decision.DEFER,
                 reason=f"評価の確信度が不十分です (confidence={confidence})。追加コンテキストが必要です。",
@@ -154,7 +169,7 @@ class IntentAlignment:
             }
             resp = self._get_client().messages.create(
                 model=self._model,
-                max_tokens=512,  # MODIFY の modified_params を含む JSON が途切れないよう増やす
+                max_tokens=512,
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)}],
             )

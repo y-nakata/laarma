@@ -25,12 +25,32 @@ class ToolRiskClass(str, Enum):
     """
     ツールのリスク分類。SDK 利用者（ツール実装者）が各ツールに宣言する。
 
-    SDK はツール名を知らず、この分類だけを見て評価戦略を変える:
       READ_ONLY   : 情報取得のみ。状態を変更しない（read_file, list_files など）
       WRITE       : 状態を変更するが可逆・限定的（write_file など）
       DESTRUCTIVE : 不可逆な破壊操作（delete_file, drop_database など）
 
     未宣言の場合は WRITE 相当（安全側）として扱う。
+
+    ──────────────────────────────────────────────────────────────
+    【重要: これは AARM 仕様の概念ではなく、試作上の妥協である】
+
+    AARM 仕様の action classification framework は forbidden /
+    context-dependent deny / context-dependent allow という
+    「アクションが文脈の中でどう判断されるか」の分類であり、
+    ツールに静的なリスクラベルを貼る概念は存在しない。
+
+    AARM の核心はむしろ「ツールの静的属性ではなく、セッション文脈
+    （semantic_distance / confidence_level / data_classification）から
+    アクションを動的に評価する」ことにある。ツール単位の固定ラベルは
+    AARM が乗り越えようとしている静的アプローチ（RBAC/ABAC/capability）
+    に近い発想である。
+
+    本実装が ToolRiskClass を導入しているのは、現状の派生シグナル計算
+    （キーワード + Jaccard、簡易的な埋め込み距離）の精度が不十分で、
+    破壊性を文脈から安定して判定できないためのフォールバックに過ぎない。
+    semantic_distance / confidence_level の精度が実用水準に達すれば、
+    この静的分類は不要になり、破壊性も動的に判定されるべきである。
+    ──────────────────────────────────────────────────────────────
     """
     READ_ONLY   = "READ_ONLY"
     WRITE       = "WRITE"

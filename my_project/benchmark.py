@@ -1,12 +1,27 @@
-"""Benchmark runner for AARM intent alignment and static policy behavior.
+"""Benchmark runner for AARM pipeline layers.
 
 Usage:
   pip install -e laarma_sdk
   export ANTHROPIC_API_KEY=your_api_key
-  python my_project/benchmark.py
+  python my_project/benchmark.py                       # pipeline mode (default)
+  python my_project/benchmark.py --mode policy-engine  # PolicyEngine only, no LLM
+  python my_project/benchmark.py --pure-intent-alignment  # raw LLM judgment
 
-This script loads benchmark_data.jsonl and evaluates each case through the
-AARMRuntime pipeline, measuring execution time and decision consistency.
+Modes:
+  pipeline (default)
+    Full PolicyEngine + IntentAlignment pipeline with policy.yaml.
+    Tests the system as deployed.
+
+  policy-engine  (--mode policy-engine)
+    Skip IntentAlignment entirely. Tests PolicyEngine rules in isolation.
+    No API calls — fast deterministic regression test.
+    Cases whose expected decision is ALLOW or STEP_UP are SKIP
+    (PolicyEngine cannot produce these).
+
+  intent-alignment  (--pure-intent-alignment / --mode intent-alignment)
+    Bypass PolicyEngine configurable rules (keep denied_tools only).
+    Disable confidence/scope-expansion pre-checks in IntentAlignment.
+    Tests the LLM's raw semantic judgment. Mismatches are informational only.
 """
 
 from __future__ import annotations
@@ -24,7 +39,20 @@ _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from laarma import AARMRuntime, Decision, EnvironmentContext, IdentityContext, MaintenanceWindow
+from laarma import (
+    AARMRuntime, Decision, EnvironmentContext, IdentityContext,
+    MaintenanceWindow, Policy, ToolRiskClass, load_policy,
+)
+from laarma.policy_engine import DEFAULT_POLICY
+
+# path 変換のドメイン知識。policy.yaml の modify_transform が参照する。
+_TRANSFORM_REGISTRY: dict[str, Any] = {
+    "basename":    os.path.basename,
+    "to_relative": lambda p: "./" + p.lstrip("/"),
+}
+
+# PolicyEngine のみが判断できる decision セット
+_POLICY_ENGINE_DECISIONS = {Decision.DENY, Decision.DEFER, Decision.MODIFY}
 
 
 @dataclass
@@ -88,11 +116,47 @@ def compare_modified_params(actual: dict[str, Any] | None, expected: dict[str, A
     return True
 
 
+def _build_policy(mode: str) -> tuple[Policy, dict]:
+    """モードに応じた Policy と transform_registry を返す。"""
+    policy_path = Path(__file__).parent / "policies" / "policy.yaml"
+
+    if mode == "pipeline":
+        return load_policy(policy_path), _TRANSFORM_REGISTRY
+
+    if mode == "intent-alignment":
+        # PolicyEngine の configurable rules を空にし、confidence/scope pre-check を無効化。
+        # denied_tools は安全上の理由で残す。
+        policy = Policy(
+            denied_tools=set(DEFAULT_POLICY.denied_tools),
+            required_params={},
+            max_actions=999,
+            rules=[],
+            confidence_defer_threshold=0.0,      # confidence DEFER pre-check 無効
+            scope_expansion_deny_threshold=1.01,  # scope expansion DENY pre-check 無効
+        )
+        return policy, {}
+
+    if mode == "policy-engine":
+        return load_policy(policy_path), _TRANSFORM_REGISTRY
+
+    raise ValueError(f"Unknown mode: {mode}")
+
+
 def run_case(
     case: BenchmarkCase,
+    mode: str = "pipeline",
     model: str | None = None,
-    enable_intent_alignment_confidence_deferral: bool = True,
-) -> tuple[Decision, dict[str, Any] | None, float]:
+) -> tuple[Decision | None, dict[str, Any] | None, float, str]:
+    """
+    Returns (decision, modified_params, elapsed_seconds, status).
+    status: "run" | "skip"
+    """
+    expected = Decision(case.expected_decision)
+
+    # policy-engine モードでは LLM 判断が必要なケースをスキップ
+    if mode == "policy-engine" and expected not in _POLICY_ENGINE_DECISIONS:
+        return None, None, 0.0, "skip"
+
     env = build_environment(case.environment)
     identity = IdentityContext(
         human_principal="benchmark@local",
@@ -100,26 +164,46 @@ def run_case(
         session_id=case.id,
         privilege_scope=[case.action["tool_name"]],
     )
+    policy, transform_registry = _build_policy(mode)
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,
         environment=env,
         model=model,
-        enable_intent_alignment_confidence_deferral=enable_intent_alignment_confidence_deferral,
+        policy=policy,
+        transform_registry=transform_registry,
+        skip_intent_alignment=(mode == "policy-engine"),
     )
+    risk_class = ToolRiskClass(case.action.get("risk_class", "WRITE"))
     start = time.monotonic()
-    result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
+    result = runtime.intercept(case.action["tool_name"], case.action["parameters"], risk_class=risk_class)
     elapsed = time.monotonic() - start
-    return result.decision, result.modified_params, elapsed
+    return result.decision, result.modified_params, elapsed, "run"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run AARM benchmark cases.")
     parser.add_argument("--data-file", default="benchmark_data.jsonl", help="Benchmark dataset JSONL file")
     parser.add_argument("--model", default=None, help="Claude model to use for IntentAlignment")
-    parser.add_argument("--pure-intent-alignment", action="store_true", help="Disable IntentAlignment confidence-based prechecks and benchmark the raw LLM judgment")
+    parser.add_argument(
+        "--mode",
+        choices=["pipeline", "intent-alignment", "policy-engine"],
+        default="pipeline",
+        help=(
+            "pipeline: full PolicyEngine + IntentAlignment (default); "
+            "intent-alignment: raw LLM judgment, bypass configurable rules; "
+            "policy-engine: PolicyEngine only, no LLM"
+        ),
+    )
+    # 後方互換エイリアス
+    parser.add_argument("--pure-intent-alignment", action="store_true",
+                        help="Alias for --mode intent-alignment (backwards compatible)")
     parser.add_argument("--verbose", action="store_true", help="Show detailed case output")
     args = parser.parse_args()
+
+    mode = args.mode
+    if args.pure_intent_alignment:
+        mode = "intent-alignment"
 
     data_path = Path(__file__).resolve().parent / args.data_file
     if not data_path.exists():
@@ -130,61 +214,99 @@ def main() -> int:
     total_time = 0.0
     pass_count = 0
     fail_count = 0
-    summary: dict[str, int] = {decision.value: 0 for decision in Decision}
+    skip_count = 0
+    inform_count = 0
+    summary: dict[str, int] = {d.value: 0 for d in Decision}
     mismatches: list[str] = []
-    strict_mode = not args.pure_intent_alignment
+    inform_mismatches: list[str] = []
+    strict_mode = (mode != "intent-alignment")
 
     print(f"Loaded {len(cases)} benchmark cases from {data_path}")
-    print(f"Using IntentAlignment model: {args.model or os.getenv('AARM_MODEL', 'default')}")
-    if args.pure_intent_alignment:
-        print("Pure IntentAlignment mode: IntentAlignment confidence-based prechecks are disabled, and expectation mismatches are informational only.")
+    print(f"Mode: {mode}")
+    if mode != "policy-engine":
+        print(f"Model: {args.model or os.getenv('AARM_MODEL', 'default')}")
+    if mode == "intent-alignment":
+        print("Note: intent-alignment mode tests raw LLM judgment; mismatches are informational only.")
+    if mode == "policy-engine":
+        print("Note: policy-engine mode skips ALLOW/STEP_UP cases (not decidable without IntentAlignment).")
     print()
 
     for case in cases:
-        decision, modified_params, elapsed = run_case(
-            case,
-            model=args.model,
-            enable_intent_alignment_confidence_deferral=not args.pure_intent_alignment,
-        )
+        decision, modified_params, elapsed, status = run_case(case, mode=mode, model=args.model)
+
+        if status == "skip":
+            skip_count += 1
+            if args.verbose:
+                print(f"Case: {case.id}  [SKIP — not decidable by PolicyEngine alone]")
+            continue
+
         total_time += elapsed
         summary[decision.value] += 1
         expected = case.expected_decision
         ok = decision.value == expected and compare_modified_params(modified_params, case.expected_modified_params)
+
+        # policy-engine モードで PolicyEngine が ALLOW（= pass-through）を返したが
+        # 期待値が DENY/STEP_UP の場合は「IntentAlignment が担うべき判断」であり
+        # PolicyEngine の正常動作。strict fail ではなく informational として扱う。
+        ia_passthrough = (
+            mode == "policy-engine"
+            and decision == Decision.ALLOW
+            and expected in (Decision.DENY, Decision.STEP_UP)
+        )
+
         if ok:
             pass_count += 1
+        elif ia_passthrough:
+            inform_count += 1
+            inform_mismatches.append(case.id)
         elif strict_mode:
             fail_count += 1
             mismatches.append(case.id)
         else:
             mismatches.append(case.id)
 
-        if args.verbose or not ok:
-            print(f"Case: {case.id}")
+        if args.verbose or (not ok and not ia_passthrough):
+            label = "✅" if ok else ("ℹ️ " if ia_passthrough else ("⚠️" if not strict_mode else "❌"))
+            print(f"{label} Case: {case.id}")
             print(f"  user_intent: {case.user_intent}")
             print(f"  action: {case.action}")
             print(f"  expected: {case.expected_decision}")
             print(f"  actual:   {decision.value}")
-            print(f"  expected_modified_params: {case.expected_modified_params}")
-            print(f"  actual_modified_params:   {modified_params}")
+            if case.expected_modified_params or modified_params:
+                print(f"  expected_modified_params: {case.expected_modified_params}")
+                print(f"  actual_modified_params:   {modified_params}")
             print(f"  elapsed: {elapsed:.2f}s\n")
 
+    run_count = len(cases) - skip_count
     print("Benchmark summary:")
     print(f"  cases:         {len(cases)}")
+    print(f"  run:           {run_count}")
+    print(f"  skip:          {skip_count}")
     print(f"  pass:          {pass_count}")
     print(f"  fail:          {fail_count}")
-    print(f"  total time:    {total_time:.2f}s")
-    print(f"  avg time/case: {total_time / len(cases):.2f}s")
+    if inform_count:
+        print(f"  informational: {inform_count}  (PolicyEngine pass-through — IntentAlignment would decide)")
+    if run_count > 0:
+        print(f"  total time:    {total_time:.2f}s")
+        print(f"  avg time/case: {total_time / run_count:.2f}s")
     print("  decisions:")
-    for decision, count in summary.items():
-        print(f"    {decision}: {count}")
+    for d, count in summary.items():
+        if count:
+            print(f"    {d}: {count}")
 
     if mismatches:
-        print("\nMismatched cases:")
+        label = "Mismatched cases" if strict_mode else "Informational mismatches"
+        print(f"\n{label}:")
         for case_id in mismatches:
             print(f"  - {case_id}")
 
-    if args.pure_intent_alignment:
-        print("\nNote: Pure IntentAlignment mode is exploratory; expectation mismatches do not cause a nonzero exit status.")
+    if inform_mismatches:
+        print("\nInformational (PolicyEngine pass-through — expected IntentAlignment to decide):")
+        for case_id in inform_mismatches:
+            print(f"  - {case_id}")
+
+    if mode == "intent-alignment":
+        print("\nNote: intent-alignment mode is exploratory; mismatches do not cause a nonzero exit status.")
     return 1 if fail_count else 0
 
 

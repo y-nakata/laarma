@@ -1,5 +1,8 @@
 {
     "python.analysis.extraPaths": [
         "./laarma_sdk/src"
-    ]
+    ],
+    "yaml.schemas": {
+        "./my_project/policies/policy.schema.json": "my_project/policies/*.yaml"
+    }
 }

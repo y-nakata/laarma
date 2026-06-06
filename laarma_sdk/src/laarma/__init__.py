@@ -10,6 +10,7 @@ from .environment import EnvironmentContext, MaintenanceWindow
 from .intent_alignment import IntentAlignment
 from .models import Action, AuthorizationResult, Decision, IdentityContext, SessionContext, ToolRiskClass
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
+from .policy_loader import load_policy
 from .runtime import AARMRuntime
 from .tool_proxy import AARMToolProxy, ToolBlocked
 
@@ -25,6 +26,7 @@ __all__ = [
     "EnvironmentContext",
     "IdentityContext",
     "IntentAlignment",
+    "load_policy",
     "MaintenanceWindow",
     "Policy",
     "PolicyEngine",

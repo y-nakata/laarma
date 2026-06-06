@@ -1,0 +1,28 @@
+# laarma PAP — 静的ポリシー定義ファイル
+#
+# laarma_sdk の PolicyEngine に読み込まれ、静的ゲートとして機能する。
+# load_policy() でこのファイルを読み込み AARMRuntime に渡す。
+#
+# キー説明:
+#   denied_tools    : 絶対禁止ツール。呼び出されると即 DENY。
+#   required_params : ツールごとの必須パラメータ。不足時は DEFER。
+#   max_actions     : セッション内の最大アクション数。超過時は DENY。
+
+denied_tools:
+  - drop_database
+  - delete_all_records
+  - exfiltrate_data
+  - disable_logging
+
+required_params:
+  write_file:
+    - path
+    - content
+  delete_file:
+    - path
+  send_email:
+    - to
+    - subject
+    - body
+
+max_actions: 50

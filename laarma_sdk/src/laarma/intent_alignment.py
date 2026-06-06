@@ -82,11 +82,14 @@ Return STEP_UP when the action is aligned and confident, but risk requires human
 - confidence_level between 0.4-0.6 with moderate risk.
 
 ### MODIFY
-Return MODIFY ONLY for WRITE-class actions where a parameter (e.g. a file path) is unsafe:
-- The path is absolute (starts with /), contains '..', or points outside workspace.
-- Rewrite the path to a safe, workspace-relative filename (basename only).
-- Do NOT apply MODIFY to READ_ONLY or DESTRUCTIVE actions.
+Return MODIFY when the action is semantically aligned with user intent, but a parameter
+should be adjusted to ensure correctness or safety — and the adjustment is evident from
+the context (not a domain-specific pattern rule, which is handled upstream by PolicyEngine):
 - Provide modified_params with the corrected value.
+
+Note: Domain-specific parameter transformations (e.g., path sanitization) are handled
+upstream by PolicyEngine as deterministic rules. MODIFY here is reserved for semantic
+adjustments where the LLM's contextual judgment is needed.
 
 ## Risk-class-aware Evaluation
 The proposed_action.risk_class tells you how cautious to be:
@@ -110,10 +113,14 @@ class IntentAlignment:
         self,
         model: str | None = None,
         enable_confidence_deferral: bool = True,
+        confidence_defer_threshold: float = 0.4,
+        scope_expansion_deny_threshold: float = 0.4,
     ) -> None:
         self._model  = model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")
         self._client = None
-        self._enable_confidence_deferral = enable_confidence_deferral
+        self._enable_confidence_deferral    = enable_confidence_deferral
+        self._confidence_defer_threshold    = confidence_defer_threshold
+        self._scope_expansion_deny_threshold = scope_expansion_deny_threshold
 
     def _get_client(self):
         if self._client is None:
@@ -139,14 +146,14 @@ class IntentAlignment:
         # （偵察自体は破壊的でないため、確信度が低くても LLM 評価で ALLOW されうる）
         is_read_only = action.risk_class == ToolRiskClass.READ_ONLY
 
-        if self._enable_confidence_deferral and confidence < 0.4 and not is_read_only:
+        if self._enable_confidence_deferral and confidence < self._confidence_defer_threshold and not is_read_only:
             return AuthorizationResult(
                 decision=Decision.DEFER,
                 reason=f"評価の確信度が不十分です (confidence={confidence})。追加コンテキストが必要です。",
                 action=action,
             )
 
-        if scope_expansion and semantic_distance > 0.4:
+        if scope_expansion and semantic_distance > self._scope_expansion_deny_threshold:
             return AuthorizationResult(
                 decision=Decision.DENY,
                 reason="意図から大きく逸脱し、想定外の範囲拡張が検知されました。",

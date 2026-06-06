@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .policy_engine import Policy
+from .policy_engine import Policy, StaticRule
 
 
 def load_policy(path: str | Path) -> Policy:
@@ -51,8 +51,24 @@ def load_policy(path: str | Path) -> Policy:
     else:
         raise ValueError(f"未対応のポリシーファイル形式: {suffix!r}  (対応: .yaml, .yml, .json)")
 
+    rules = [
+        StaticRule(
+            id=r["id"],
+            decision=r["decision"],
+            reason=r["reason"],
+            conditions=r.get("conditions", {}),
+            modify_transform=r.get("modify_transform"),
+        )
+        for r in data.get("rules", [])
+    ]
+
+    evaluation = data.get("evaluation", {})
+
     return Policy(
         denied_tools=set(data.get("denied_tools", [])),
         required_params={k: list(v) for k, v in data.get("required_params", {}).items()},
         max_actions=int(data.get("max_actions", 50)),
+        rules=rules,
+        confidence_defer_threshold=float(evaluation.get("confidence_defer_threshold", 0.4)),
+        scope_expansion_deny_threshold=float(evaluation.get("scope_expansion_deny_threshold", 0.4)),
     )

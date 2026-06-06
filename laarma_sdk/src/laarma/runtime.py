@@ -25,12 +25,18 @@ class AARMRuntime:
         model: str | None = None,
         metadata: dict[str, Any] | None = None,
         skip_intent_alignment: bool = False,
+        transform_registry: "dict[str, Any] | None" = None,
     ) -> None:
         self._identity              = identity
         self._environment           = environment
         self._accumulator           = ContextAccumulator(user_intent=user_intent, metadata=metadata)
-        self._policy_engine         = PolicyEngine(policy=policy or DEFAULT_POLICY)
-        self._intent_alignment      = IntentAlignment(model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"))
+        _policy                     = policy or DEFAULT_POLICY
+        self._policy_engine         = PolicyEngine(policy=_policy, transform_registry=transform_registry)
+        self._intent_alignment      = IntentAlignment(
+            model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),
+            confidence_defer_threshold=_policy.confidence_defer_threshold,
+            scope_expansion_deny_threshold=_policy.scope_expansion_deny_threshold,
+        )
         self._skip_intent_alignment = skip_intent_alignment
 
     def intercept(

@@ -7,6 +7,8 @@
 #   denied_tools    : 絶対禁止ツール。呼び出されると即 DENY。
 #   required_params : ツールごとの必須パラメータ。不足時は DEFER。
 #   max_actions     : セッション内の最大アクション数。超過時は DENY。
+#   rules           : 追加の静的ルール（順番に評価、最初にマッチしたものを適用）。
+#   evaluation      : IntentAlignment へ渡す評価パラメータ。
 
 denied_tools:
   - drop_database
@@ -26,3 +28,31 @@ required_params:
     - body
 
 max_actions: 50
+
+# 静的ルール（PolicyEngine が順番に評価）
+# 【注記】これらは AARM 仕様外のドメイン固有ルール（ToolRiskClass と同種の試作上の妥協）。
+# path パターンマッチングなどの決定論的変換を PolicyEngine に委ねることで
+# IntentAlignment を純粋な AARM 意図整合性評価に特化させている。
+rules:
+  - id: unsafe_write_path
+    decision: MODIFY
+    reason: "危険な書き込み先 '{path}' を安全なパスに書き換えました。"
+    conditions:
+      tool: write_file
+      param_matches:
+        path: '^/|\.\.'
+    modify_transform:
+      path: basename  # _TRANSFORM_REGISTRY のキー: "basename" → os.path.basename
+
+  - id: production_delete_defer
+    decision: DEFER
+    reason: "本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）。"
+    conditions:
+      tool: delete_file
+      environment_type: production
+      not_in_maintenance_window: true
+
+# IntentAlignment へ橋渡しする評価パラメータ
+evaluation:
+  confidence_defer_threshold: 0.4     # この値未満の confidence かつ非 READ_ONLY → DEFER
+  scope_expansion_deny_threshold: 0.4  # scope_expansion かつ semantic_distance がこの値超 → DENY

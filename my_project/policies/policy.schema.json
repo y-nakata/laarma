@@ -22,6 +22,82 @@
       "type": "integer",
       "minimum": 1,
       "description": "セッション内の最大アクション数。超過時は DENY。"
+    },
+    "rules": {
+      "type": "array",
+      "description": "追加の静的ルール。PolicyEngine が順番に評価し、最初にマッチしたものを適用する。",
+      "items": {
+        "type": "object",
+        "required": ["id", "decision", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ルールの一意識別子。"
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["DENY", "DEFER", "MODIFY"],
+            "description": "条件一致時に返す決定。"
+          },
+          "reason": {
+            "type": "string",
+            "description": "決定理由のテンプレート文字列。{param_name} でアクションパラメータを参照可能。"
+          },
+          "conditions": {
+            "type": "object",
+            "description": "全て AND 評価。全条件一致でルールが発火する。",
+            "additionalProperties": false,
+            "properties": {
+              "tool": {
+                "type": "string",
+                "description": "一致させるツール名。"
+              },
+              "environment_type": {
+                "type": "string",
+                "enum": ["production", "staging", "development"],
+                "description": "一致させる環境種別。"
+              },
+              "not_in_maintenance_window": {
+                "type": "boolean",
+                "description": "true のとき、メンテナンス窓外の場合のみマッチ。"
+              },
+              "param_matches": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "パラメータ名 → 正規表現パターン のマップ。全て一致でマッチ。"
+              }
+            }
+          },
+          "modify_transform": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["basename", "to_relative"]
+            },
+            "description": "MODIFY 時のパラメータ変換。パラメータ名 → 変換名 (_TRANSFORM_REGISTRY のキー)。"
+          }
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "description": "IntentAlignment へ橋渡しする評価パラメータ。",
+      "additionalProperties": false,
+      "properties": {
+        "confidence_defer_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "この値未満の confidence かつ非 READ_ONLY アクション → DEFER。"
+        },
+        "scope_expansion_deny_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "scope_expansion 検知かつ semantic_distance がこの値超 → DENY。"
+        }
+      }
     }
   }
 }

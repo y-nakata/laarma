@@ -251,7 +251,7 @@ def main() -> int:
         ia_passthrough = (
             mode == "policy-engine"
             and decision == Decision.ALLOW
-            and expected in (Decision.DENY, Decision.STEP_UP)
+            and expected in (Decision.DENY, Decision.STEP_UP, Decision.DEFER)
         )
 
         if ok:

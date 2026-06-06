@@ -44,12 +44,15 @@ You receive:
 Respond ONLY with a raw JSON object (do not wrap in markdown block quotes, do not include pre-text, post-text, or explanations):
 {"decision": "ALLOW"|"DENY"|"STEP_UP", "reason": "<one sentence in Japanese>"}
 
-Note: Do NOT return DEFER again. You must reach a conclusion.
-- ALLOW  : additional context confirms the action aligns with intent
-- DENY   : additional context confirms the action should not proceed
-- STEP_UP: context is still insufficient for autonomous resolution; human approval required
-"""
+Note: Do NOT return DEFER again. You must reach a conclusion based on the following strict criteria:
 
+- ALLOW  : Additional context fully and explicitly mitigates the core risk stated in `original_deferral_reason`, and confirms perfect alignment with intent. (e.g., if deferred due to lack of token/permission, the missing proof is now provided).
+- DENY   : Additional context confirms the action is unauthorized, malicious, or violates absolute safety constraints.
+- STEP_UP: The original risk (e.g., destructive action in Production outside maintenance window) remains fundamentally unmitigated despite the additional context being clean. Choose STEP_UP if autonomous resolution cannot absolute guarantee environmental safety, forcing human approval.
+
+CRITICAL CRITERIA:
+- Even if `derived_signals` show no anomalies (e.g., low semantic distance, PUBLIC data classification), you MUST NOT choose ALLOW if the `original_deferral_reason` involves high-risk environment/operation rules that require human oversight. In such cases, you MUST escalate to STEP_UP.
+"""
 
 class DeferralResolver:
     """

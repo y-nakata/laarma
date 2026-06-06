@@ -21,7 +21,7 @@ from laarma import (
     EnvironmentContext, IdentityContext, MaintenanceWindow,
 )
 from my_project.agent import run as agent_run
-from my_project.tools import IMPLS
+from my_project.tools import FILES, IMPLS
 
 
 def format_modified_params(params: dict) -> str:
@@ -64,7 +64,18 @@ def run_scenario(
     for name, fn in IMPLS.items():
         proxy.register(name, fn)
 
-    agent_run(user_request, proxy)
+    file_list = sorted(FILES.keys())
+    initial_messages = [
+        {
+            "role": "user",
+            "content": (
+                "WORLD_STATE: The simulated file system currently contains the following files: "
+                + ", ".join(file_list)
+            ),
+        }
+    ]
+
+    agent_run(user_request, proxy, initial_messages=initial_messages)
 
     ctx = runtime.context_summary
     sig = ctx.get("derived_signals", {})

@@ -73,7 +73,14 @@ class AARMToolProxy:
                 raise KeyError(f"Tool '{tool_name}' not registered.")
             output = fn(params)
             self._runtime.record_tool_output(result.action.action_id, output)
-            return output
+            return {
+                "decision": result.decision.value,
+                "tool_name": tool_name,
+                "requested_params": params,
+                "actual_params": params,
+                "modified_params": None,
+                "content": output,
+            }
 
         # 3. MODIFY（引数書き換え許可）処理
         if result.decision == Decision.MODIFY:
@@ -89,7 +96,14 @@ class AARMToolProxy:
 
             # 書き換えた後の実行結果をコンテキスト履歴に正しくバインド
             self._runtime.record_tool_output(result.action.action_id, output)
-            return output
+            return {
+                "decision": result.decision.value,
+                "tool_name": tool_name,
+                "requested_params": params,
+                "actual_params": actual_params,
+                "modified_params": result.modified_params,
+                "content": output,
+            }
 
         # 4. DENY / STEP_UP 処理（ブロック例外）
         raise ToolBlocked(result.decision, result.reason)

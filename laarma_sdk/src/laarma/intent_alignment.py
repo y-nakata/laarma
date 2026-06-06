@@ -173,6 +173,11 @@ class IntentAlignment:
             fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.S)
             if fence:
                 raw_text = fence.group(1)
+            else:
+                first_brace = raw_text.find("{")
+                last_brace = raw_text.rfind("}")
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    raw_text = raw_text[first_brace:last_brace + 1]
             parsed          = json.loads(raw_text)
             decision        = Decision(parsed["decision"])
             reason          = parsed.get("reason", "(reason not provided)")

@@ -48,9 +48,9 @@ export ANTHROPIC_API_KEY=your_api_key
 python my_project/demo.py
 ```
 
-## PAP（Policy as Code）
+## PAP（Policy Administration Point）
 
-静的ポリシーは `my_project/policies/policy.yaml` で管理し、`load_policy()` で SDK に渡します。
+静的ポリシーは `my_project/policies/policy.yaml` で定義します。PAP はポリシーの定義・管理を担うコンポーネントであり、SDK 本体（PDP）とは分離して置かれます。`load_policy()` でファイルを読み込み SDK に注入します。
 
 ```python
 from laarma import AARMRuntime, load_policy

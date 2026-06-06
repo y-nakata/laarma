@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./laarma_sdk/src"
+    ]
+}

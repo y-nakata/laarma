@@ -9,10 +9,9 @@ import os
 from typing import Any
 
 from .context_accumulator import ContextAccumulator
-from .distance_calculator import DistanceCalculator
 from .environment import EnvironmentContext
 from .intent_alignment import IntentAlignment
-from .models import Action, AuthorizationResult, Decision, IdentityContext
+from .models import Action, AuthorizationResult, Decision, IdentityContext, ToolRiskClass
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
 
 
@@ -24,58 +23,46 @@ class AARMRuntime:
         environment: EnvironmentContext | None = None,
         policy: Policy | None = None,
         model: str | None = None,
-        distance_calculator: DistanceCalculator | None = None,
         metadata: dict[str, Any] | None = None,
         skip_intent_alignment: bool = False,
-        enable_intent_alignment_confidence_deferral: bool = True,
     ) -> None:
-        """
-        Args:
-            user_intent:   ユーザーの元の目的・リクエスト
-            identity:      アクションを実行するアイデンティティ (R6)
-            environment:   環境コンテキスト E (メンテナンス窓・環境種別など)
-            policy:        カスタムポリシー
-            model:         IntentAlignment で使う Claude モデル
-            metadata:      セッションの付加情報
-            enable_intent_alignment_confidence_deferral: IntentAlignment の低確信度 DEFER を有効にする
-        """
         self._identity              = identity
         self._environment           = environment
-        self._accumulator           = ContextAccumulator(
-            user_intent=user_intent,
-            metadata=metadata,
-            distance_calculator=distance_calculator,
-        )
+        self._accumulator           = ContextAccumulator(user_intent=user_intent, metadata=metadata)
         self._policy_engine         = PolicyEngine(policy=policy or DEFAULT_POLICY)
-        self._intent_alignment      = IntentAlignment(
-            model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),
-            enable_confidence_deferral=enable_intent_alignment_confidence_deferral,
-        )
+        self._intent_alignment      = IntentAlignment(model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"))
         self._skip_intent_alignment = skip_intent_alignment
 
-    def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
+    def intercept(
+        self,
+        tool_name: str,
+        parameters: dict[str, Any],
+        risk_class: ToolRiskClass = ToolRiskClass.WRITE,
+    ) -> AuthorizationResult:
         """
         アクションをインターセプトして認可判断を返す。
         DEFER の場合はここではそのまま返す。解決ワークフローは ToolProxy が担当。
         """
-        action = Action(tool_name=tool_name, parameters=parameters, identity=self._identity)
+        action = Action(
+            tool_name=tool_name,
+            parameters=parameters,
+            identity=self._identity,
+            risk_class=risk_class,
+        )
         self._accumulator.record_action(action)
-
-        # PolicyEngineのevaluate呼び出しに環境コンテキストを追加で渡す
         result = self._policy_engine.evaluate(action, self._accumulator.context, self._environment)
-
         if result is None:
             if self._skip_intent_alignment:
                 result = AuthorizationResult(decision=Decision.ALLOW, reason="ポリシー通過。", action=action)
             else:
-                # (a, C, E) タプルで評価
                 result = self._intent_alignment.evaluate(
                     action,
                     self._accumulator.summary(),
                     self._environment,
                 )
         self._accumulator.record_result(result)
-        self._log(result)
+        if result.decision != Decision.DEFER:
+            self._log(result)
         return result
 
     def record_tool_output(self, action_id: str, output: Any) -> None:

@@ -21,6 +21,22 @@ class Decision(str, Enum):
     STEP_UP = "STEP_UP"
 
 
+class ToolRiskClass(str, Enum):
+    """
+    ツールのリスク分類。SDK 利用者（ツール実装者）が各ツールに宣言する。
+
+    SDK はツール名を知らず、この分類だけを見て評価戦略を変える:
+      READ_ONLY   : 情報取得のみ。状態を変更しない（read_file, list_files など）
+      WRITE       : 状態を変更するが可逆・限定的（write_file など）
+      DESTRUCTIVE : 不可逆な破壊操作（delete_file, drop_database など）
+
+    未宣言の場合は WRITE 相当（安全側）として扱う。
+    """
+    READ_ONLY   = "READ_ONLY"
+    WRITE       = "WRITE"
+    DESTRUCTIVE = "DESTRUCTIVE"
+
+
 @dataclass
 class IdentityContext:
     """R6: アクションを実行するアイデンティティの多層表現。"""
@@ -44,6 +60,7 @@ class Action:
     tool_name:   str
     parameters:  dict[str, Any]
     identity:    IdentityContext | None = None
+    risk_class:  ToolRiskClass = ToolRiskClass.WRITE
     action_id:   str      = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp:   datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -53,6 +70,7 @@ class Action:
             "tool_name":  self.tool_name,
             "parameters": self.parameters,
             "identity":   self.identity.to_dict() if self.identity else None,
+            "risk_class": self.risk_class.value,
             "timestamp":  self.timestamp.isoformat(),
         }
 

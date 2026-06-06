@@ -31,7 +31,7 @@ aarm/
 |---|---|---|
 | `laarma_sdk/` | — | AARM 仕様の実装（SDK本体） |
 | `my_project/agent.py` | 知らない | ツールを呼ぶだけ |
-| `my_project/tools.py` | 知らない | ツール定義・実装 |
+| `my_project/tools.py` | 部分的 | ツール定義・実装 + risk_class 宣言 |
 | `my_project/demo.py` | 知っている | laarma をセットアップしてエージェントに注入 |
 
 ## セットアップ
@@ -103,6 +103,14 @@ python aarm/my_project/benchmark.py --pure-intent-alignment
 
 AARM 仕様（R1〜R6）の構造・設計思想・処理フローは仕様に沿って実装済みです。
 本リポジトリは**検証段階の試作実装**であり、仕様準拠の動作確認を目的としています。
+
+### `ToolRiskClass` は AARM 仕様の概念ではない（試作上の妥協）
+
+本実装には `ToolRiskClass`（READ_ONLY / WRITE / DESTRUCTIVE）という、ツール単位のリスク分類があります。これは **AARM 仕様には存在しない概念** です。
+
+AARM 仕様の action classification framework は forbidden / context-dependent deny / context-dependent allow という「アクションが文脈の中でどう判断されるか」の分類であり、ツールに静的なリスクラベルを貼る発想はありません。むしろ AARM の核心は「ツールの静的属性ではなく、セッション文脈（semantic_distance / confidence_level / data_classification）からアクションを動的に評価する」ことにあり、ツール単位の固定ラベルは AARM が乗り越えようとしている静的アプローチ（RBAC / ABAC / capability-based security）に近い発想です。
+
+本実装が `ToolRiskClass` を導入しているのは、現状の派生シグナル計算の精度が不十分で、破壊性を文脈から安定して判定できないためのフォールバックに過ぎません。距離計算とキャリブレーションの精度が実用水準に達すれば、この静的分類は不要になり、破壊性も動的に判定されるべきものです。
 
 ### 既知の最適化課題
 

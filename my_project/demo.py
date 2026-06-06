@@ -4,9 +4,9 @@ demo.py — デモエントリーポイント
 AARM の価値を示す8つのシナリオを実行する。
 
 セットアップ:
-  pip install -e aarm/laarma_sdk
+  pip install -e laarma_sdk
   export ANTHROPIC_API_KEY=your_api_key
-  python aarm/my_project/demo.py
+  python my_project/demo.py
 """
 
 import sys

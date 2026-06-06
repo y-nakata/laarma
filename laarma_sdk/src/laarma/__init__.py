@@ -1,7 +1,7 @@
 """
 laarma — Learning AARM Agent SDK
 
-pip install -e aarm/laarma_sdk でローカルインストールして使う。
+pip install -e laarma_sdk でローカルインストールして使う。
 """
 
 from .context_accumulator import ContextAccumulator

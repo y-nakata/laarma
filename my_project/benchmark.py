@@ -1,9 +1,9 @@
 """Benchmark runner for AARM intent alignment and static policy behavior.
 
 Usage:
-  pip install -e aarm/laarma_sdk
+  pip install -e laarma_sdk
   export ANTHROPIC_API_KEY=your_api_key
-  python aarm/my_project/benchmark.py
+  python my_project/benchmark.py
 
 This script loads benchmark_data.jsonl and evaluates each case through the
 AARMRuntime pipeline, measuring execution time and decision consistency.

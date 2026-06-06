@@ -1,4 +1,4 @@
-# AARM プロトタイプ (Laarma: Learning AARM Agent)
+# Laarma: Learning AARM Agent
 
 AARM (Autonomous Action Runtime Management) の Python 試作実装です。
 [CSA AARM 仕様](https://aarm.dev/spec) に基づき、AI エージェントのアクションを実行前にインターセプト・評価・記録するランタイムを実装します。
@@ -6,9 +6,9 @@ AARM (Autonomous Action Runtime Management) の Python 試作実装です。
 ## 構成
 
 ```
-aarm/
+laarma/
 ├── laarma_sdk/        # laarma パッケージ（AARM SDK）
-│   ├── pyproject.toml   # pip install -e aarm/laarma_sdk
+│   ├── pyproject.toml   # pip install -e laarma_sdk
 │   └── src/laarma/
 │       ├── models.py              # データモデル (R1〜R6)
 │       ├── context_accumulator.py # コンテキスト蓄積 (R2)
@@ -37,31 +37,31 @@ aarm/
 ## セットアップ
 
 ```bash
-pip install -e aarm/laarma_sdk
+pip install -e laarma_sdk
 export ANTHROPIC_API_KEY=your_api_key
-python aarm/my_project/demo.py
+python my_project/demo.py
 ```
 
 ## ベンチマーク
 
-`aarm/my_project/benchmark.py` と `aarm/my_project/benchmark_data.jsonl` を使って、Intent Alignment と静的ポリシーの挙動を評価できます。
+`my_project/benchmark.py` と `my_project/benchmark_data.jsonl` を使って、Intent Alignment と静的ポリシーの挙動を評価できます。
 
 ```bash
-pip install -e aarm/laarma_sdk
+pip install -e laarma_sdk
 export ANTHROPIC_API_KEY=your_api_key
-python aarm/my_project/benchmark.py
+python my_project/benchmark.py
 ```
 
 `--model` で Claude モデルを指定できます。
 
 ```bash
-python aarm/my_project/benchmark.py --model claude-sonnet-4-6
+python my_project/benchmark.py --model claude-sonnet-4-6
 ```
 
 `--pure-intent-alignment` を指定すると、IntentAlignment 内の決定的事前チェックを無効化し、純粋な LLM 判定に近い挙動をベンチマークできます。
 
 ```bash
-python aarm/my_project/benchmark.py --pure-intent-alignment
+python my_project/benchmark.py --pure-intent-alignment
 ```
 
 このモードは探索的評価向けです。既存の期待値ファイルは通常モード（rule+LLM ハイブリッド）を前提としているため、不一致は情報として出力されますが、非ゼロ終了にはなりません。

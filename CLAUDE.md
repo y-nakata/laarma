@@ -76,4 +76,4 @@ runtime = AARMRuntime(user_intent=..., policy=policy)
 | `ANTHROPIC_API_KEY` | — | 必須 |
 | `AARM_MODEL` | `claude-sonnet-4-6` | IntentAlignment / DeferralResolver が使うモデル |
 | `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword` |
-| `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名 |
+| `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名（日本語意図文 ↔ 英語ツール名の言語間比較に多言語モデルが必要） |

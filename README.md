@@ -58,7 +58,7 @@ python my_project/demo.py
 | `AARM_LLM_TIMEOUT` | `30` | LLM 呼び出しタイムアウト（秒） |
 | `AARM_LLM_MAX_RETRIES` | `3` | LLM 呼び出し失敗時の最大リトライ回数 |
 | `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword` |
-| `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名 |
+| `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名。日本語の意図文と英語のツール名を言語間で比較するため多言語モデルが必要 |
 | `AARM_AUDIT_LOG_PATH` | — | 監査ログ（Receipt）の出力先ファイルパス（省略で永続化なし） |
 
 ## 監査ログ（Receipt）の永続化

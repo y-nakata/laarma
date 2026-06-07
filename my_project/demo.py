@@ -23,7 +23,7 @@ from laarma import (
     load_policy, Policy,
 )
 from my_project.agent import run as agent_run
-from my_project.tools import FILES, IMPLS
+from my_project.tools import IMPLS
 
 # path 変換のドメイン知識。YAML の modify_transform が参照する変換名を定義する。
 # laarma_sdk 側には置かず、プロジェクト側で管理する。
@@ -77,18 +77,7 @@ def run_scenario(
     for name, fn in IMPLS.items():
         proxy.register(name, fn)
 
-    file_list = sorted(FILES.keys())
-    initial_messages = [
-        {
-            "role": "user",
-            "content": (
-                "WORLD_STATE: The simulated file system currently contains the following files: "
-                + ", ".join(file_list)
-            ),
-        }
-    ]
-
-    agent_run(user_request, proxy, initial_messages=initial_messages)
+    agent_run(user_request, proxy)
 
     ctx = runtime.context_summary
     sig = ctx.get("derived_signals", {})

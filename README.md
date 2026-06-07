@@ -195,14 +195,6 @@ python my_project/benchmark.py --pure-intent-alignment
 AARM 仕様（R1〜R6）の構造・設計思想・処理フローは仕様に沿って実装済みです。
 本リポジトリは**検証段階の試作実装**であり、仕様準拠の動作確認を目的としています。
 
-### `ToolRiskClass` は廃止済み
-
-本実装はかつて `ToolRiskClass`（READ_ONLY / WRITE / DESTRUCTIVE）というツール単位のリスク分類を持っていましたが、**廃止しました**。
-
-`ToolRiskClass` は **AARM 仕様に存在しない概念** です。AARM の核心は「ツールの静的属性ではなく、セッション文脈（semantic_distance / confidence_level / data_classification）からアクションを動的に評価する」ことにあり、ツール単位の固定ラベルは AARM が乗り越えようとしている静的アプローチ（RBAC / ABAC / capability-based security）に近い発想です。
-
-距離計算（embedding ベース）と IntentAlignment による動的判断が軌道に乗ったことで、静的ラベルへの依存を解消しました。
-
 ### 既知の最適化課題
 
 Intent Alignment に渡す派生シグナル（`semantic_distance` / `confidence_level`）は、埋め込みベースの距離計算を導入した `DistanceCalculator` 戦略に移行しています。`IntentAlignment` は純粋な意図整合性評価（ALLOW / DENY / DEFER / STEP_UP / MODIFY）を担い、`PolicyEngine` はドメイン固有の決定論的ルール（YAML 差し込み）と絶対禁止ツール・必須パラメータ検証に専念します。

@@ -95,8 +95,13 @@ class AuthorizationResult:
 
     def _compute_hash(self) -> str:
         payload = json.dumps(
-            {"receipt_id": self.receipt_id, "action": self.action.to_dict(),
-             "decision": self.decision.value, "reason": self.reason},
+            {
+                "receipt_id":     self.receipt_id,
+                "action":         self.action.to_dict(),
+                "decision":       self.decision.value,
+                "reason":         self.reason,
+                "modified_params": self.modified_params,
+            },
             sort_keys=True, ensure_ascii=False,
         )
         return hashlib.sha256(payload.encode()).hexdigest()

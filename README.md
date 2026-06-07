@@ -98,6 +98,19 @@ python my_project/demo.py
 
 メモリ内のレシートは `runtime.receipts`（`list[dict]`）で参照できます。
 
+### 改ざんチェック
+
+```bash
+python my_project/check_audit_log.py aarm_audit.jsonl
+```
+
+各エントリの `receipt_hash` を再計算して一致を検証します（終了コード 1 で不一致報告）。
+
+> **注: このチェックの限界**  
+> `receipt_hash` は鍵なし SHA-256 であるため、攻撃者が同じアルゴリズムでハッシュを
+> 再計算・差し替えた場合の改ざんは検出できません。偶発的破損および
+> ハッシュアルゴリズムを知らない素朴な改ざんの抑止を目的とした実装です。
+
 ## PAP（Policy Administration Point）
 
 静的ポリシーは `my_project/policies/policy.yaml` で定義します。PAP はポリシーの定義・管理を担うコンポーネントであり、SDK 本体（PDP）とは分離して置かれます。`load_policy()` でファイルを読み込み SDK に注入します。

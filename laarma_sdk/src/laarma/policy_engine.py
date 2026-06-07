@@ -81,6 +81,11 @@ class Policy:
     # IntentAlignment へ橋渡しする評価パラメータ（Policy に同居させることで一元管理）
     confidence_defer_threshold:     float                = 0.4
     scope_expansion_deny_threshold: float                = 0.4
+    # データ分類キーワード（省略時は context_accumulator.py のデフォルト値を使う）
+    pii_keywords:          frozenset[str] | None = None
+    confidential_keywords: frozenset[str] | None = None
+    sensitive_tools:       frozenset[str] | None = None
+    destructive_tools:     frozenset[str] | None = None
 
 
 DEFAULT_POLICY = Policy(

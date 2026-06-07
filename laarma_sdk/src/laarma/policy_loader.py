@@ -63,6 +63,10 @@ def load_policy(path: str | Path) -> Policy:
     ]
 
     evaluation = data.get("evaluation", {})
+    dc = data.get("data_classification", {})
+
+    def _frozenset_or_none(lst: list | None) -> "frozenset[str] | None":
+        return frozenset(lst) if lst else None
 
     return Policy(
         denied_tools=set(data.get("denied_tools", [])),
@@ -71,4 +75,8 @@ def load_policy(path: str | Path) -> Policy:
         rules=rules,
         confidence_defer_threshold=float(evaluation.get("confidence_defer_threshold", 0.4)),
         scope_expansion_deny_threshold=float(evaluation.get("scope_expansion_deny_threshold", 0.4)),
+        pii_keywords=_frozenset_or_none(dc.get("pii_keywords")),
+        confidential_keywords=_frozenset_or_none(dc.get("confidential_keywords")),
+        sensitive_tools=_frozenset_or_none(dc.get("sensitive_tools")),
+        destructive_tools=_frozenset_or_none(dc.get("destructive_tools")),
     )

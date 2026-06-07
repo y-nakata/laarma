@@ -75,11 +75,16 @@ class DeferralResolver:
         self._model = model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")
         self._client = None
         self._additional_context_fn = additional_context_fn or self._default_additional_context
+        self._timeout     = float(os.getenv("AARM_LLM_TIMEOUT", "30"))
+        self._max_retries = int(os.getenv("AARM_LLM_MAX_RETRIES", "3"))
 
     def _get_client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(
+                timeout=self._timeout,
+                max_retries=self._max_retries,
+            )
         return self._client
 
     def resolve(

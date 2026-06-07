@@ -102,39 +102,6 @@ data_classification:
     - delete_all_records
     - execute_shell
 
-# データ分類キーワード（省略するとデフォルト値を使用）
-data_classification:
-  pii_keywords:
-    - email
-    - email_address
-    - phone
-    - phone_number
-    - address
-    - ssn
-    - credit
-    - customer
-    - personal
-    - name
-    - info
-  confidential_keywords:
-    - secret
-    - token
-    - key
-    - credential
-    - private
-    - internal
-    - config
-  sensitive_tools:
-    - database
-    - db
-    - execute_shell
-    - execute_sql
-  destructive_tools:
-    - delete_file
-    - drop_database
-    - delete_all_records
-    - execute_shell
-
 # IntentAlignment へ橋渡しする評価パラメータ
 evaluation:
   confidence_defer_threshold: 0.4     # この値未満の confidence かつ非 READ_ONLY → DEFER

@@ -146,16 +146,16 @@ def run_case(
     case: BenchmarkCase,
     mode: str = "pipeline",
     model: str | None = None,
-) -> tuple[Decision | None, dict[str, Any] | None, float, str]:
+) -> tuple[Decision | None, dict[str, Any] | None, float, str, str | None, dict | None]:
     """
-    Returns (decision, modified_params, elapsed_seconds, status).
+    Returns (decision, modified_params, elapsed_seconds, status, reason, context_summary).
     status: "run" | "skip"
     """
     expected = Decision(case.expected_decision)
 
     # policy-engine モードでは LLM 判断が必要なケースをスキップ
     if mode == "policy-engine" and expected not in _POLICY_ENGINE_DECISIONS:
-        return None, None, 0.0, "skip"
+        return None, None, 0.0, "skip", None, None
 
     env = build_environment(case.environment)
     identity = IdentityContext(
@@ -177,7 +177,7 @@ def run_case(
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
     elapsed = time.monotonic() - start
-    return result.decision, result.modified_params, elapsed, "run"
+    return result.decision, result.modified_params, elapsed, "run", result.reason, runtime.context_summary
 
 
 def main() -> int:
@@ -231,7 +231,7 @@ def main() -> int:
     print()
 
     for case in cases:
-        decision, modified_params, elapsed, status = run_case(case, mode=mode, model=args.model)
+        decision, modified_params, elapsed, status, reason, context = run_case(case, mode=mode, model=args.model)
 
         if status == "skip":
             skip_count += 1
@@ -271,9 +271,19 @@ def main() -> int:
             print(f"  action: {case.action}")
             print(f"  expected: {case.expected_decision}")
             print(f"  actual:   {decision.value}")
+            if reason:
+                print(f"  reason:   {reason}")
             if case.expected_modified_params or modified_params:
                 print(f"  expected_modified_params: {case.expected_modified_params}")
                 print(f"  actual_modified_params:   {modified_params}")
+            if args.verbose and context:
+                sig = context.get("derived_signals", {})
+                sd = sig.get("semantic_distance", {})
+                print(f"  semantic_distance: avg={sd.get('average', '—')} current={sd.get('current', '—')}")
+                print(f"  confidence:        {sig.get('confidence_level', '—')}")
+                dc = sig.get("data_classifications", [])
+                if dc:
+                    print(f"  data_classifications: {dc}")
             print(f"  elapsed: {elapsed:.2f}s\n")
 
     run_count = len(cases) - skip_count

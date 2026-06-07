@@ -27,9 +27,8 @@ from typing import Any
 
 def _normalize_text(text: str) -> list[str]:
     ascii_tokens = re.findall(r"[a-zA-Z0-9_\.]+", text.lower())
-    # raw string 内の \u はリテラルになるため非 raw string を使う
-    # U+3040-30FF: ひらがな・カタカナ  U+4E00-9FFF: CJK 漢字
-    ja_chars = re.findall("[぀-ヿ一-鿿]", text)
+    # raw string では \u がリテラルになるため非 raw string で記述
+    ja_chars = re.findall("[\u3040-\u30ff\u4e00-\u9fff]", text)
     return ascii_tokens + ja_chars
 
 

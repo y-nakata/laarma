@@ -62,6 +62,8 @@ class AARMRuntime:
                     self._environment,
                 )
         self._accumulator.record_result(result)
+        # DEFER を含む全判断をここで一元ログする。
+        # tool_proxy.py 側で DEFER を別途 print しないこと（二重ログになる）。
         self._log(result)
         return result
 
@@ -71,6 +73,8 @@ class AARMRuntime:
     def record_deferred_resolution(self, resolved: AuthorizationResult) -> None:
         """認可結果に追記する (DEFER 解決後)。"""
         self._accumulator.record_result(resolved)
+        # DEFER 解決後の最終判断（ALLOW / DENY / STEP_UP）のみをログする。
+        # DEFER 自体は intercept() が既にログ済み。
         self._log(resolved)
 
     @property

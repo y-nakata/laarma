@@ -18,18 +18,24 @@ from typing import Any
 from .distance_calculator import DistanceCalculator, create_default_distance_calculator
 from .models import Action, AuthorizationResult, SessionContext
 
-_PII_KEYWORDS      = {"email", "password", "phone", "address", "ssn", "credit", "customer", "personal", "name", "info"}
-_CONFIDENTIAL_KEYS = {"secret", "token", "key", "credential", "private", "internal", "config"}
-_SENSITIVE_TOOLS   = {"database", "db", "execute_shell", "execute_sql"}
-_DESTRUCTIVE_TOOLS = {"delete_file", "drop_database", "delete_all_records", "execute_shell"}
+_DEFAULT_PII_KEYWORDS      = frozenset({"email", "password", "phone", "address", "ssn", "credit", "customer", "personal", "name", "info"})
+_DEFAULT_CONFIDENTIAL_KEYS = frozenset({"secret", "token", "key", "credential", "private", "internal", "config"})
+_DEFAULT_SENSITIVE_TOOLS   = frozenset({"database", "db", "execute_shell", "execute_sql"})
+_DEFAULT_DESTRUCTIVE_TOOLS = frozenset({"delete_file", "drop_database", "delete_all_records", "execute_shell"})
 
 
-def _classify_data(tool_name: str, parameters: dict) -> list[str]:
+def _classify_data(
+    tool_name: str,
+    parameters: dict,
+    pii_keywords: frozenset[str],
+    confidential_keywords: frozenset[str],
+    sensitive_tools: frozenset[str],
+) -> list[str]:
     combined = (tool_name + " " + " ".join(str(v) for v in parameters.values())).lower()
     labels = []
-    if any(k in combined for k in _PII_KEYWORDS):      labels.append("PII")
-    if any(k in combined for k in _CONFIDENTIAL_KEYS): labels.append("CONFIDENTIAL")
-    if tool_name in _SENSITIVE_TOOLS:                  labels.append("SENSITIVE_TOOL")
+    if any(k in combined for k in pii_keywords):         labels.append("PII")
+    if any(k in combined for k in confidential_keywords): labels.append("CONFIDENTIAL")
+    if tool_name in sensitive_tools:                      labels.append("SENSITIVE_TOOL")
     return labels or ["PUBLIC"]
 
 
@@ -106,6 +112,7 @@ class ContextAccumulator:
         user_intent: str,
         metadata: dict[str, Any] | None = None,
         distance_calculator: DistanceCalculator | None = None,
+        policy: Any | None = None,
     ) -> None:
         self._context = SessionContext(user_intent=user_intent, metadata=metadata or {})
         self._receipts: list[dict]  = []
@@ -116,11 +123,18 @@ class ContextAccumulator:
         self._confidence_history:   list[float] = []
         self._action_matches_intent: list[bool] = []
         self._distance_calculator = distance_calculator or create_default_distance_calculator()
+        self._pii_keywords         = (policy.pii_keywords          if policy and policy.pii_keywords          is not None else _DEFAULT_PII_KEYWORDS)
+        self._confidential_keywords = (policy.confidential_keywords if policy and policy.confidential_keywords is not None else _DEFAULT_CONFIDENTIAL_KEYS)
+        self._sensitive_tools      = (policy.sensitive_tools        if policy and policy.sensitive_tools       is not None else _DEFAULT_SENSITIVE_TOOLS)
+        self._destructive_tools    = (policy.destructive_tools      if policy and policy.destructive_tools     is not None else _DEFAULT_DESTRUCTIVE_TOOLS)
 
     def record_action(self, action: Action) -> None:
         self._context.append_action(action)
 
-        classifications = _classify_data(action.tool_name, action.parameters)
+        classifications = _classify_data(
+            action.tool_name, action.parameters,
+            self._pii_keywords, self._confidential_keywords, self._sensitive_tools,
+        )
         self._data_classifications.extend(classifications)
 
         dist = self._distance_calculator.compute(
@@ -141,7 +155,7 @@ class ContextAccumulator:
             data_classifications=classifications,
             scope_expansion=expanded,
             action_count=len(self._confidence_history),
-            is_destructive=action.tool_name in _DESTRUCTIVE_TOOLS,
+            is_destructive=action.tool_name in self._destructive_tools,
             action_matches_intent=matches_intent,
         )
         self._confidence_history.append(confidence)

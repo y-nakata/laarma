@@ -29,8 +29,8 @@ class AARMRuntime:
     ) -> None:
         self._identity              = identity
         self._environment           = environment
-        self._accumulator           = ContextAccumulator(user_intent=user_intent, metadata=metadata)
         _policy                     = policy or DEFAULT_POLICY
+        self._accumulator           = ContextAccumulator(user_intent=user_intent, metadata=metadata, policy=_policy)
         self._policy_engine         = PolicyEngine(policy=_policy, transform_registry=transform_registry)
         self._intent_alignment      = IntentAlignment(
             model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),

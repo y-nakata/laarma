@@ -83,8 +83,17 @@ class SentenceTransformerDistanceCalculator(DistanceCalculator):
 
     def _load_model(self):
         if self._model is None:
+            import os
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._model_name)
+            token = os.getenv("HF_TOKEN")
+            try:
+                self._model = SentenceTransformer(
+                    self._model_name,
+                    token=token,
+                    local_files_only=(token is None),
+                )
+            except OSError:
+                self._model = SentenceTransformer(self._model_name)
         return self._model
 
     def _build_action_text(self, tool_name: str, parameters: dict[str, Any]) -> str:

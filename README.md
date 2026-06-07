@@ -60,6 +60,7 @@ python my_project/demo.py
 | `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword` |
 | `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名。日本語の意図文と英語のツール名を言語間で比較するため多言語モデルが必要 |
 | `AARM_AUDIT_LOG_PATH` | — | 監査ログ（Receipt）の出力先ファイルパス（省略で永続化なし） |
+| `HF_TOKEN` | — | Hugging Face 認証トークン。設定すると HF Hub への認証済みリクエストになり警告が消える。未設定の場合はキャッシュ済みモデルをローカルのみで読み込む |
 
 ## 監査ログ（Receipt）の永続化
 

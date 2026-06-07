@@ -74,9 +74,8 @@ def run_scenario(
         transform_registry=transform_registry,
     )
     proxy = AARMToolProxy(runtime, deferral_resolver=deferral_resolver)
-    # IMPLS は (fn, risk_class) のタプル。SDK 利用者がリスク分類を宣言する。
-    for name, (fn, risk_class) in IMPLS.items():
-        proxy.register(name, fn, risk_class)
+    for name, fn in IMPLS.items():
+        proxy.register(name, fn)
 
     file_list = sorted(FILES.keys())
     initial_messages = [

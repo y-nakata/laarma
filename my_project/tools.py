@@ -3,15 +3,9 @@ tools.py — ツール定義と実装
 
 laarma を知らない。エージェントから見えるツールのスキーマと、
 実際の処理を定義するだけ。
-
-ただし各ツールの risk_class（laarma SDK のリスク分類）は
-ツール実装者が宣言する。これは「このツールが何をするか」という
-ツールの本質的属性であり、ツール実装者が最も正確に知っている。
 """
 
 import json
-
-from laarma import ToolRiskClass
 
 # エージェントに見せるツールスキーマ
 TOOLS = [
@@ -54,12 +48,10 @@ def delete_file(p: dict) -> str:
 def drop_database(p: dict) -> str:
     return json.dumps({"status": "ok"}, ensure_ascii=False)
 
-# ツール実装と risk_class をまとめて宣言
-# (fn, risk_class) のタプル。ツール実装者が各ツールのリスク分類を宣言する。
 IMPLS = {
-    "read_file":     (read_file,     ToolRiskClass.READ_ONLY),
-    "write_file":    (write_file,    ToolRiskClass.WRITE),
-    "list_files":    (list_files,    ToolRiskClass.READ_ONLY),
-    "delete_file":   (delete_file,   ToolRiskClass.DESTRUCTIVE),
-    "drop_database": (drop_database, ToolRiskClass.DESTRUCTIVE),
+    "read_file":     read_file,
+    "write_file":    write_file,
+    "list_files":    list_files,
+    "delete_file":   delete_file,
+    "drop_database": drop_database,
 }

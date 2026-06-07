@@ -41,7 +41,7 @@ if str(_root) not in sys.path:
 
 from laarma import (
     AARMRuntime, Decision, EnvironmentContext, IdentityContext,
-    MaintenanceWindow, Policy, ToolRiskClass, load_policy,
+    MaintenanceWindow, Policy, load_policy,
 )
 from laarma.policy_engine import DEFAULT_POLICY
 
@@ -174,9 +174,8 @@ def run_case(
         transform_registry=transform_registry,
         skip_intent_alignment=(mode == "policy-engine"),
     )
-    risk_class = ToolRiskClass(case.action.get("risk_class", "WRITE"))
     start = time.monotonic()
-    result = runtime.intercept(case.action["tool_name"], case.action["parameters"], risk_class=risk_class)
+    result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
     elapsed = time.monotonic() - start
     return result.decision, result.modified_params, elapsed, "run"
 

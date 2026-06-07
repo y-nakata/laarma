@@ -30,7 +30,7 @@ required_params:
 max_actions: 50
 
 # 静的ルール（PolicyEngine が順番に評価）
-# 【注記】これらは AARM 仕様外のドメイン固有ルール（ToolRiskClass と同種の試作上の妥協）。
+# 【注記】これらは AARM 仕様外のドメイン固有ルール（試作上の妥協）。
 # path パターンマッチングなどの決定論的変換を PolicyEngine に委ねることで
 # IntentAlignment を純粋な AARM 意図整合性評価に特化させている。
 rules:

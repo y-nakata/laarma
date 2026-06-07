@@ -11,7 +11,7 @@ from typing import Any
 from .context_accumulator import ContextAccumulator
 from .environment import EnvironmentContext
 from .intent_alignment import IntentAlignment
-from .models import Action, AuthorizationResult, Decision, IdentityContext, ToolRiskClass
+from .models import Action, AuthorizationResult, Decision, IdentityContext
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
 
 
@@ -39,12 +39,7 @@ class AARMRuntime:
         )
         self._skip_intent_alignment = skip_intent_alignment
 
-    def intercept(
-        self,
-        tool_name: str,
-        parameters: dict[str, Any],
-        risk_class: ToolRiskClass = ToolRiskClass.WRITE,
-    ) -> AuthorizationResult:
+    def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """
         アクションをインターセプトして認可判断を返す。
         DEFER の場合はここではそのまま返す。解決ワークフローは ToolProxy が担当。
@@ -53,7 +48,6 @@ class AARMRuntime:
             tool_name=tool_name,
             parameters=parameters,
             identity=self._identity,
-            risk_class=risk_class,
         )
         self._accumulator.record_action(action)
         result = self._policy_engine.evaluate(action, self._accumulator.context, self._environment)

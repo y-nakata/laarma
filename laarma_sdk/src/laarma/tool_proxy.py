@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .deferral import DeferralResolver
-from .models import Decision, ToolRiskClass
+from .models import Decision
 from .runtime import AARMRuntime
 
 
@@ -39,25 +39,9 @@ class AARMToolProxy:
         self._runtime  = runtime
         self._resolver = deferral_resolver or DeferralResolver()
         self._tools: dict[str, Callable[[dict], Any]] = {}
-        self._risk_classes: dict[str, ToolRiskClass] = {}
 
-    def register(
-        self,
-        tool_name: str,
-        fn: Callable[[dict], Any],
-        risk_class: ToolRiskClass = ToolRiskClass.WRITE,
-    ) -> None:
-        """
-        ツールを登録する。
-
-        Args:
-            tool_name:  ツール名
-            fn:         ツール実装
-            risk_class: ツールのリスク分類。SDK 利用者が宣言する。
-                        省略時は WRITE（安全側）。
-        """
+    def register(self, tool_name: str, fn: Callable[[dict], Any]) -> None:
         self._tools[tool_name] = fn
-        self._risk_classes[tool_name] = risk_class
 
     def call(self, tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
         """
@@ -68,8 +52,7 @@ class AARMToolProxy:
         Raises:
             ToolBlocked: DENY / STEP_UP の場合。
         """
-        risk_class = self._risk_classes.get(tool_name, ToolRiskClass.WRITE)
-        result = self._runtime.intercept(tool_name, params, risk_class=risk_class)
+        result = self._runtime.intercept(tool_name, params)
 
         # 1. DEFER（保留）処理 — 自律解決を試みる
         if result.decision == Decision.DEFER:

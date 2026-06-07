@@ -203,13 +203,20 @@ python my_project/benchmark.py --pure-intent-alignment
 
 ## 現状と今後の課題
 
-### 実装ステータス
+### AARM 仕様準拠状況
 
-AARM 仕様（R1〜R6）の構造・設計思想・処理フローは仕様に沿って実装済みです。
-本リポジトリは**検証段階の試作実装**であり、仕様準拠の動作確認を目的としています。
+本リポジトリは**検証段階の試作実装**です。仕様（R1–R6 MUST / R7–R9 SHOULD）に対する現在の準拠状況:
 
-### 既知の最適化課題
+| 要件 | 区分 | 実装状況 | 説明 |
+|------|------|---------|------|
+| R1 事前インターセプト | MUST | ✅ | `AARMToolProxy` が全ツール呼び出しを仲介 |
+| R2 コンテキスト蓄積 | MUST | ✅ | `ContextAccumulator` が Cn = Cn-1 ∪ {an, on, δn} を維持 |
+| R3 意図整合性評価 | MUST | ✅ | `PolicyEngine`（静的）+ `IntentAlignment`（動的 LLM）の二層評価 |
+| R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
+| R5 改ざん耐性レシート | MUST | ⚠️ | `receipt_hash` は鍵なし SHA-256（完全な tamper-evident 要件は未達） |
+| R6 アイデンティティバインディング | MUST | ⚠️ | ハッシュペイロードに identity を含むが非対称署名なし（non-repudiation 未達） |
+| R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` 計算あり・直近 5 アクションに限定 |
+| R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
+| R9 最小権限強制 | SHOULD | ❌ | `privilege_scope` フィールドあり・評価エンジン未組み込み |
 
-Intent Alignment に渡す派生シグナル（`semantic_distance` / `confidence_level`）は、埋め込みベースの距離計算を導入した `DistanceCalculator` 戦略に移行しています。`IntentAlignment` は純粋な意図整合性評価（ALLOW / DENY / DEFER / STEP_UP / MODIFY）を担い、`PolicyEngine` はドメイン固有の決定論的ルール（YAML 差し込み）と絶対禁止ツール・必須パラメータ検証に専念します。
-
-このプロトタイプでは、より高精度な距離計算とキャリブレーションを進めることで、`confidence_level` の閾値調整を次のステップとしています。埋め込みモデルの選定・日本語対応・意図ドリフト評価の実測ベンチマークを行い、実運用に近い挙動を目指します。
+凡例: ✅ 準拠 / ⚠️ 部分準拠（MUST 差異あり）/ 🔶 部分実装 / ❌ 未実装

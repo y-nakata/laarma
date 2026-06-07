@@ -197,9 +197,15 @@ class IntentAlignment:
                 if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
                     raw_text = raw_text[first_brace:last_brace + 1]
             parsed          = json.loads(raw_text)
-            decision        = Decision(parsed["decision"])
-            reason          = parsed.get("reason", "(reason not provided)")
-            modified_params = parsed.get("modified_params") if decision == Decision.MODIFY else None
+            raw_decision    = parsed.get("decision", "")
+            valid_decisions = {d.value for d in Decision}
+            if raw_decision not in valid_decisions:
+                print(f"⚠️  [IntentAlignment] 未知の decision 値: {raw_decision!r} → DEFER にフォールバック")
+                decision, reason, modified_params = Decision.DEFER, f"LLM が未知の decision 値を返しました: {raw_decision!r}", None
+            else:
+                decision        = Decision(raw_decision)
+                reason          = parsed.get("reason", "(reason not provided)")
+                modified_params = parsed.get("modified_params") if decision == Decision.MODIFY else None
         except Exception as e:
             decision, reason, modified_params = Decision.DEFER, f"意図整合性評価中にエラー: {e}", None
 

@@ -56,7 +56,8 @@ class AARMToolProxy:
 
         # 1. DEFER（保留）処理 — 自律解決を試みる
         if result.decision == Decision.DEFER:
-            print(f"[AARM] ⏸️  DEFER   | {tool_name:25s} | {result.reason}")
+            # runtime.intercept() が既に DEFER をログ済み。ここでは再ログしない。
+            # DEFER のログを追加したくなった場合は runtime._log() に一元化すること（デグレ防止）。
             print(f"[AARM] 🔄 自律解決を試みる...")
             resolved = self._resolver.resolve(
                 deferred_result=result,

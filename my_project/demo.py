@@ -102,6 +102,13 @@ def run_scenario(
 if __name__ == "__main__":
     _policy = load_policy(Path(__file__).parent / "policies" / "policy.yaml")
 
+    if os.getenv("AARM_DISTANCE_CALCULATOR", "embedding") == "embedding":
+        from laarma.distance_calculator import create_default_distance_calculator
+        print("embedding モデルを初期化中...", end=" ", flush=True)
+        _calc = create_default_distance_calculator()
+        _calc.compute("warmup", "noop", {})
+        print("完了")
+
     alice = IdentityContext(
         human_principal  = "alice@example.com",
         service_identity = "agent-svc@iam",

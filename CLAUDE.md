@@ -77,3 +77,4 @@ runtime = AARMRuntime(user_intent=..., policy=policy)
 | `AARM_MODEL` | `claude-sonnet-4-6` | IntentAlignment / DeferralResolver が使うモデル |
 | `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword` |
 | `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名（日本語意図文 ↔ 英語ツール名の言語間比較に多言語モデルが必要） |
+| `HF_TOKEN` | — | Hugging Face 認証トークン。設定すると HF Hub への認証済みリクエストになり未認証警告が消える |

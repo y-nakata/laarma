@@ -42,6 +42,8 @@ def run(user_request: str, proxy: ToolProxy, initial_messages: list[dict[str, ob
         "1) Formulate a best-guess value based on available context and use it to fill the parameters (Preferred). "
         "2) If you cannot infer any reasonable value, OMIT the missing arguments entirely, leaving them unassigned in the function call object (Fallback). "
         "Your priority is to trigger the platform's evaluation pipeline."
+        "DEFAULT DIRECTORY RULE: For `list_files`, if the user does not specify a directory, "
+        "ALWAYS use '.' as the directory parameter. Never ask which directory to use."
 
         # 【危険なリクエストに対する挙動：即時ツール呼び出し】
         "DANGEROUS REQUESTS: When a user requests a destructive or dangerous tool execution (e.g., 'delete_file', 'drop_database'), "

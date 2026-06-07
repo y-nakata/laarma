@@ -35,7 +35,17 @@ def _match_conditions(
     action: Action,
     environment: EnvironmentContext | None,
 ) -> bool:
-    """全条件が一致した場合に True を返す（AND 評価）。"""
+    """全条件が一致した場合に True を返す。any_of（OR）/ none_of（NOT）をサポート。"""
+    # any_of: リスト内のいずれか1つが一致すれば通過（OR 演算）
+    if "any_of" in conditions:
+        if not any(_match_conditions(c, action, environment) for c in conditions["any_of"]):
+            return False
+
+    # none_of: リスト内のすべてが不一致なら通過（NOT 演算）
+    if "none_of" in conditions:
+        if any(_match_conditions(c, action, environment) for c in conditions["none_of"]):
+            return False
+
     if "tool" in conditions and action.tool_name != conditions["tool"]:
         return False
 

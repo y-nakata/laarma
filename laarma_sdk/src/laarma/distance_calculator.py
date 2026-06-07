@@ -14,6 +14,7 @@ Embedding バックエンド:
   AARM_DISTANCE_CALCULATOR: "embedding" (default) | "keyword"
   AARM_EMBEDDING_MODEL: sentence-transformers のモデル名
                         (default: "paraphrase-multilingual-MiniLM-L12-v2")
+                        日本語の意図文と英語のツール名の言語間比較が必要なため多言語モデルを使用
 """
 
 from __future__ import annotations
@@ -25,7 +26,11 @@ from typing import Any
 
 
 def _normalize_text(text: str) -> list[str]:
-    return [t for t in re.findall(r"[a-zA-Z0-9_\.]+", text.lower()) if t]
+    ascii_tokens = re.findall(r"[a-zA-Z0-9_\.]+", text.lower())
+    # raw string 内の \u はリテラルになるため非 raw string を使う
+    # U+3040-30FF: ひらがな・カタカナ  U+4E00-9FFF: CJK 漢字
+    ja_chars = re.findall("[぀-ヿ一-鿿]", text)
+    return ascii_tokens + ja_chars
 
 
 class DistanceCalculator(ABC):
@@ -61,9 +66,9 @@ class SentenceTransformerDistanceCalculator(DistanceCalculator):
     追加 API キー不要。モデルは初回呼び出し時に自動ダウンロードされる。
 
     デフォルトモデル: paraphrase-multilingual-MiniLM-L12-v2
-      - 多言語対応（日本語を含む）
-      - 軽量 (約4MB)
-      - KeywordDistanceCalculator より大幅に高精度
+      - 多言語対応（日本語・英語を含む 50+ 言語）
+      - 日本語の意図文 ↔ 英語のツール名の言語間距離計算に対応
+      - 軽量（約 120MB）・追加依存なし
     """
 
     # シングルトン: モデルのロードは高コストなのでインスタンスごとに保持する

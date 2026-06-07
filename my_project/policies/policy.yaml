@@ -30,7 +30,7 @@ required_params:
 max_actions: 50
 
 # 静的ルール（PolicyEngine が順番に評価）
-# 【注記】これらは AARM 仕様外のドメイン固有ルール（ToolRiskClass と同種の試作上の妥協）。
+# 【注記】これらは AARM 仕様外のドメイン固有ルール（試作上の妥協）。
 # path パターンマッチングなどの決定論的変換を PolicyEngine に委ねることで
 # IntentAlignment を純粋な AARM 意図整合性評価に特化させている。
 rules:
@@ -68,6 +68,39 @@ rules:
             path: '\.(conf|config|log|db|sqlite)$'
         - param_matches:
             path: 'database'
+
+# データ分類キーワード（省略するとデフォルト値を使用）
+data_classification:
+  pii_keywords:
+    - email
+    - email_address
+    - phone
+    - phone_number
+    - address
+    - ssn
+    - credit
+    - customer
+    - personal
+    - name
+    - info
+  confidential_keywords:
+    - secret
+    - token
+    - key
+    - credential
+    - private
+    - internal
+    - config
+  sensitive_tools:
+    - database
+    - db
+    - execute_shell
+    - execute_sql
+  destructive_tools:
+    - delete_file
+    - drop_database
+    - delete_all_records
+    - execute_shell
 
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:

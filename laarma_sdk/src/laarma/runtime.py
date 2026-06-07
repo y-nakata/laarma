@@ -11,7 +11,7 @@ from typing import Any
 from .context_accumulator import ContextAccumulator
 from .environment import EnvironmentContext
 from .intent_alignment import IntentAlignment
-from .models import Action, AuthorizationResult, Decision, IdentityContext, ToolRiskClass
+from .models import Action, AuthorizationResult, Decision, IdentityContext
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
 
 
@@ -38,13 +38,9 @@ class AARMRuntime:
             scope_expansion_deny_threshold=_policy.scope_expansion_deny_threshold,
         )
         self._skip_intent_alignment = skip_intent_alignment
+        self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
 
-    def intercept(
-        self,
-        tool_name: str,
-        parameters: dict[str, Any],
-        risk_class: ToolRiskClass = ToolRiskClass.WRITE,
-    ) -> AuthorizationResult:
+    def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """
         アクションをインターセプトして認可判断を返す。
         DEFER の場合はここではそのまま返す。解決ワークフローは ToolProxy が担当。
@@ -53,7 +49,6 @@ class AARMRuntime:
             tool_name=tool_name,
             parameters=parameters,
             identity=self._identity,
-            risk_class=risk_class,
         )
         self._accumulator.record_action(action)
         result = self._policy_engine.evaluate(action, self._accumulator.context, self._environment)
@@ -96,3 +91,9 @@ class AARMRuntime:
         who    = f" | {self._identity.human_principal}" if self._identity else ""
         suffix = f" [解決: {result.resolution_method}]" if result.resolution_method else ""
         print(f"[AARM] {icon} {result.decision.value:7s} | {result.action.tool_name:25s} | {result.reason}{who}{suffix}")
+        if self._audit_log_path:
+            import json
+            entry = result.to_dict()
+            entry["session_id"] = self.session_id
+            with open(self._audit_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")

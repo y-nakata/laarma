@@ -5,9 +5,6 @@ Policy Engine が None を返したアクションを (a, C, E) タプルで評�
   a: アクション
   C: セッションコンテキスト (派生シグナル含む)
   E: 環境コンテキスト (メンテナンス窓・環境種別など)
-
-SDK はツール名を知らない。ツールのリスク分類は Action.risk_class
-（SDK 利用者がツール登録時に宣言）を参照して評価戦略を変える。
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ import os
 import re
 from typing import TYPE_CHECKING
 
-from .models import Action, AuthorizationResult, Decision, ToolRiskClass
+from .models import Action, AuthorizationResult, Decision
 
 if TYPE_CHECKING:
     from .environment import EnvironmentContext
@@ -40,10 +37,7 @@ You receive a JSON object containing:
     - entity_set              : resources referenced in this session
     - confidence_level        : system's confidence in evaluating this action (0.0-1.0)
 - environment       : the infrastructure runtime context (type, maintenance window state)
-- proposed_action   : the action about to be executed, including its risk_class:
-    - READ_ONLY   : information-gathering only, does not change state
-    - WRITE       : changes state but reversible/limited
-    - DESTRUCTIVE : irreversible destructive operation
+- proposed_action   : the action about to be executed (tool_name and parameters)
 
 Respond ONLY with JSON (no markdown, no explanation outside JSON):
 {"decision": "ALLOW"|"DENY"|"DEFER"|"STEP_UP"|"MODIFY", "reason": "<one concise sentence in Japanese>", "modified_params": {...}}
@@ -56,7 +50,7 @@ Note: "modified_params" is only required when decision is "MODIFY". Omit it for 
 Return DENY when there is clear intent divergence or structural misalignment:
 - The proposed action contradicts or has no correlation with the user's stated intent
   (e.g., user asks to read, agent attempts to write or delete).
-- action_matches_intent is false AND semantic_distance > 0.4 for non-READ_ONLY actions.
+- action_matches_intent is false AND semantic_distance > 0.4 for destructive/write actions.
 - scope_expansion_detected is true with no justification in user_intent.
 - Compositional Risk: the sequence of actions constitutes an attack vector.
 
@@ -65,7 +59,7 @@ Return ALLOW when the action clearly serves the user's intent:
 - action_matches_intent is true or the user's request explicitly mentions the target.
 - semantic_distance < 0.3.
 - No PII/CONFIDENTIAL data involved in the action.
-- For DESTRUCTIVE actions with explicit intent and high confidence.
+- For destructive actions with explicit intent and high confidence.
 
 ### DEFER
 Return DEFER when the action may be valid but the context is insufficient to decide safely:
@@ -74,6 +68,9 @@ Return DEFER when the action may be valid but the context is insufficient to dec
   but did not specify which files — agent's independent judgment on what is "old" is not authorized).
 - confidence_level < 0.4 and more context could resolve the ambiguity.
 - The action would be safe if properly authorized, but explicit authorization is missing.
+- Information-gathering actions (read_file, list_files, etc.) should be ALLOW even when
+  the user's overall intent is ambiguous — reserve DEFER/DENY for the actual destructive
+  or write action where the risk materializes.
 
 ### STEP_UP
 Return STEP_UP when the action is aligned and confident, but risk requires human approval:
@@ -90,16 +87,6 @@ the context (not a domain-specific pattern rule, which is handled upstream by Po
 Note: Domain-specific parameter transformations (e.g., path sanitization) are handled
 upstream by PolicyEngine as deterministic rules. MODIFY here is reserved for semantic
 adjustments where the LLM's contextual judgment is needed.
-
-## Risk-class-aware Evaluation
-The proposed_action.risk_class tells you how cautious to be:
-- READ_ONLY actions only gather information and are NOT destructive. Even when the user's
-  overall intent is ambiguous, ALLOW read-only reconnaissance so the agent can gather context.
-  Reserve DEFER / STEP_UP / DENY for the actual DESTRUCTIVE or WRITE action where the
-  ambiguity or risk actually materializes.
-- Example: user says "clean up old files" (ambiguous which files).
-  - a READ_ONLY listing/inspection action → ALLOW (reconnaissance is safe)
-  - a DESTRUCTIVE deletion on an agent-guessed target → DEFER (user never specified which)
 
 ## Priority Rule
 DENY > DEFER > STEP_UP > MODIFY > ALLOW
@@ -147,11 +134,7 @@ class IntentAlignment:
         semantic_distance = signals.get("semantic_distance", {}).get("current", 0.0)
         scope_expansion   = signals.get("scope_expansion_detected", False)
 
-        # 読み取り専用の偵察アクションは確信度チェックをスキップ。
-        # （偵察自体は破壊的でないため、確信度が低くても LLM 評価で ALLOW されうる）
-        is_read_only = action.risk_class == ToolRiskClass.READ_ONLY
-
-        if self._enable_confidence_deferral and confidence < self._confidence_defer_threshold and not is_read_only:
+        if self._enable_confidence_deferral and confidence < self._confidence_defer_threshold:
             return AuthorizationResult(
                 decision=Decision.DEFER,
                 reason=f"評価の確信度が不十分です (confidence={confidence})。追加コンテキストが必要です。",
@@ -180,7 +163,6 @@ class IntentAlignment:
                 "proposed_action": {
                     "tool_name":  action.tool_name,
                     "parameters": action.parameters,
-                    "risk_class": action.risk_class.value,
                 },
             }
             resp = self._get_client().messages.create(

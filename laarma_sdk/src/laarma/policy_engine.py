@@ -14,7 +14,7 @@ Policy Engine は「何があっても絶対にアウト」なものだけを弾
 【設計注記: PolicyEngine の MODIFY について】
 AARM 仕様では MODIFY は (a, C, E) タプルを評価する動的判断である。
 PolicyEngine が MODIFY を返す場合（例: 危険な書き込みパスの basename 変換）は
-ToolRiskClass と同種の「試作上の実用的妥協」であり、AARM 仕様外である。
+AARM 仕様外の実用的妥協である。
 ドメイン固有の決定論的変換ルールは IntentAlignment に混入させず
 PolicyEngine で完結させることで層の責務を明確化している。
 """

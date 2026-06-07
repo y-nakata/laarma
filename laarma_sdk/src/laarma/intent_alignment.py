@@ -121,11 +121,16 @@ class IntentAlignment:
         self._enable_confidence_deferral    = enable_confidence_deferral
         self._confidence_defer_threshold    = confidence_defer_threshold
         self._scope_expansion_deny_threshold = scope_expansion_deny_threshold
+        self._timeout     = float(os.getenv("AARM_LLM_TIMEOUT", "30"))
+        self._max_retries = int(os.getenv("AARM_LLM_MAX_RETRIES", "3"))
 
     def _get_client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(
+                timeout=self._timeout,
+                max_retries=self._max_retries,
+            )
         return self._client
 
     def evaluate(

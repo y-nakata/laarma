@@ -38,6 +38,7 @@ class AARMRuntime:
             scope_expansion_deny_threshold=_policy.scope_expansion_deny_threshold,
         )
         self._skip_intent_alignment = skip_intent_alignment
+        self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """
@@ -90,3 +91,9 @@ class AARMRuntime:
         who    = f" | {self._identity.human_principal}" if self._identity else ""
         suffix = f" [解決: {result.resolution_method}]" if result.resolution_method else ""
         print(f"[AARM] {icon} {result.decision.value:7s} | {result.action.tool_name:25s} | {result.reason}{who}{suffix}")
+        if self._audit_log_path:
+            import json
+            entry = result.to_dict()
+            entry["session_id"] = self.session_id
+            with open(self._audit_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")

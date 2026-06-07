@@ -77,6 +77,13 @@ class AARMRuntime:
         # DEFER 自体は intercept() が既にログ済み。
         self._log(resolved)
 
+    def record_step_up_resolution(self, resolved: AuthorizationResult) -> None:
+        """認可結果に追記する (STEP_UP 人間承認後)。"""
+        self._accumulator.record_result(resolved)
+        # STEP_UP 自体は intercept() が既にログ済み。
+        # ここでは人間承認後の最終判断（ALLOW / DENY）のみをログする。
+        self._log(resolved)
+
     @property
     def session_id(self) -> str:                          return self._accumulator.context.session_id
     @property

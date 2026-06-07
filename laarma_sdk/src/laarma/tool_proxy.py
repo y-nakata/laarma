@@ -4,14 +4,14 @@ AARM ToolProxy — SDK Instrumentation 層
 エージェントは proxy.call() を呼ぶだけ。AARM の存在を知らない。
 
 proxy.call() の戻り値:
-  実行が許可された場合（ALLOW / MODIFY / DEFER→解決後ALLOW）は dict を返す:
+  実行が許可された場合（ALLOW / MODIFY / DEFER→解決後ALLOW / STEP_UP→承認後ALLOW）は dict を返す:
     {
       "decision":        最終判断 (ALLOW | MODIFY),
       "content":         ツールの実行結果（文字列）,
       "actual_params":   実際に実行されたパラメータ,
       "modified_params": MODIFY の場合の書き換え後パラメータ（なければ None）,
     }
-  ブロックされた場合（DENY / STEP_UP）は ToolBlocked 例外を送出する。
+  ブロックされた場合（DENY / STEP_UP→拒否）は ToolBlocked 例外を送出する。
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from typing import Any, Callable
 from .deferral import DeferralResolver
 from .models import Decision
 from .runtime import AARMRuntime
+from .step_up_resolver import StepUpResolver
 
 
 class ToolBlocked(Exception):
@@ -35,9 +36,11 @@ class AARMToolProxy:
         self,
         runtime: AARMRuntime,
         deferral_resolver: DeferralResolver | None = None,
+        step_up_resolver: StepUpResolver | None = None,
     ) -> None:
-        self._runtime  = runtime
-        self._resolver = deferral_resolver or DeferralResolver()
+        self._runtime          = runtime
+        self._resolver         = deferral_resolver or DeferralResolver()
+        self._step_up_resolver = step_up_resolver or StepUpResolver()
         self._tools: dict[str, Callable[[dict], Any]] = {}
 
     def register(self, tool_name: str, fn: Callable[[dict], Any]) -> None:
@@ -64,6 +67,15 @@ class AARMToolProxy:
                 context_summary=self._runtime.context_summary,
             )
             self._runtime.record_deferred_resolution(resolved)
+            result = resolved
+
+        # 1b. STEP_UP（人間承認）処理
+        if result.decision == Decision.STEP_UP:
+            # runtime.intercept() または record_deferred_resolution() が既に STEP_UP をログ済み。
+            # ここでは再ログしない。
+            print("[AARM] 👤 人間の承認を待っています...")
+            resolved = self._step_up_resolver.resolve(result)
+            self._runtime.record_step_up_resolution(resolved)
             result = resolved
 
         # 2. ALLOW（通常許可）処理
@@ -95,5 +107,5 @@ class AARMToolProxy:
                 "modified_params": result.modified_params,
             }
 
-        # 4. DENY / STEP_UP 処理（ブロック例外）
+        # 4. DENY 処理（ブロック例外）
         raise ToolBlocked(result.decision, result.reason)

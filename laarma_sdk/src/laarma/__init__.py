@@ -6,6 +6,7 @@ pip install -e laarma_sdk でローカルインストールして使う。
 
 from .context_accumulator import ContextAccumulator
 from .deferral import DeferralResolver
+from .step_up_resolver import StepUpResolver
 from .environment import EnvironmentContext, MaintenanceWindow
 from .intent_alignment import IntentAlignment
 from .models import Action, AuthorizationResult, Decision, IdentityContext, SessionContext
@@ -23,6 +24,7 @@ __all__ = [
     "Decision",
     "DEFAULT_POLICY",
     "DeferralResolver",
+    "StepUpResolver",
     "EnvironmentContext",
     "IdentityContext",
     "IntentAlignment",

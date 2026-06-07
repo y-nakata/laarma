@@ -44,6 +44,18 @@ rules:
     modify_transform:
       path: basename  # _TRANSFORM_REGISTRY のキー: "basename" → os.path.basename
 
+  - id: deny_critical_file_delete_in_prod
+    decision: DENY
+    reason: "本番環境の重要ファイル（設定・DB・ログ）の削除は禁止されています。"
+    conditions:
+      tool: delete_file
+      environment_type: production
+      any_of:
+        - param_matches:
+            path: '\.(conf|config|log|db|sqlite)$'
+        - param_matches:
+            path: 'database'
+
   - id: production_delete_defer
     decision: DEFER
     reason: "本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）。"
@@ -51,6 +63,11 @@ rules:
       tool: delete_file
       environment_type: production
       not_in_maintenance_window: true
+      none_of:                          # 重要ファイルは deny_critical_file_delete_in_prod が担当
+        - param_matches:
+            path: '\.(conf|config|log|db|sqlite)$'
+        - param_matches:
+            path: 'database'
 
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:

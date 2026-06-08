@@ -6,6 +6,7 @@ AARM Runtime — R1〜R6 統合
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Any
 
 from .context_accumulator import ContextAccumulator
@@ -42,6 +43,14 @@ class AARMRuntime:
             )
         self._skip_intent_alignment = _skip_intent_alignment_for_testing
         self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
+        # R6 MUST: identity の cryptographic binding 検証
+        _hmac_secret = os.getenv("AARM_HMAC_SECRET")
+        if _hmac_secret and identity is not None and not identity.verify(_hmac_secret):
+            warnings.warn(
+                "IdentityContext の identity_token が未設定または不正です。"
+                "identity.sign(secret) で署名してから渡してください。",
+                stacklevel=2,
+            )
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """

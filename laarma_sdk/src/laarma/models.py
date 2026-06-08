@@ -10,7 +10,7 @@ import json
 import os
 import uuid
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -31,14 +31,40 @@ class IdentityContext:
     service_identity: str
     session_id:       str
     privilege_scope:  list[str] = field(default_factory=list)
+    identity_token:   str | None = field(default=None)
+
+    def _compute_token(self, secret: str) -> str:
+        payload = json.dumps(
+            {
+                "human_principal":  self.human_principal,
+                "service_identity": self.service_identity,
+                "session_id":       self.session_id,
+                "privilege_scope":  sorted(self.privilege_scope),
+            },
+            sort_keys=True, ensure_ascii=False,
+        ).encode()
+        return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+
+    def sign(self, secret: str) -> "IdentityContext":
+        """HMAC で署名した新しい IdentityContext を返す（元インスタンスは変更しない）。"""
+        return replace(self, identity_token=self._compute_token(secret))
+
+    def verify(self, secret: str) -> bool:
+        """identity_token が正しい HMAC か検証する。"""
+        if self.identity_token is None:
+            return False
+        return hmac.compare_digest(self.identity_token, self._compute_token(secret))
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "human_principal":  self.human_principal,
             "service_identity": self.service_identity,
             "session_id":       self.session_id,
             "privilege_scope":  self.privilege_scope,
         }
+        if self.identity_token:
+            d["identity_token"] = self.identity_token
+        return d
 
 
 @dataclass

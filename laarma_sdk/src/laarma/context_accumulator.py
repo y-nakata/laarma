@@ -67,7 +67,6 @@ def _action_matches_intent(user_intent: str, tool_name: str, parameters: dict) -
 def _compute_confidence(
     semantic_distance: float,
     scope_expansion: bool,
-    action_count: int,
     action_matches_intent: bool,
 ) -> float:
     """
@@ -75,7 +74,6 @@ def _compute_confidence(
     AARM 仕様 §IV-C: confidence は「(a, C) を自信を持って評価できる度合い」であり、
     アクションの危険度ではない。危険度は data_classification シグナルと
     IntentAlignment（STEP_UP / DENY）が担う。
-    0.4 未満 → DEFER のトリガーになる。
     """
     score = 1.0
 
@@ -89,10 +87,6 @@ def _compute_confidence(
     # 明示的な意図との一致があれば評価しやすい
     if action_matches_intent:
         score += 0.1
-
-    # 初回アクションはセッションコンテキストが不足
-    if action_count == 0:
-        score -= 0.1
 
     return round(max(0.0, min(1.0, score)), 3)
 
@@ -144,7 +138,6 @@ class ContextAccumulator:
         confidence = _compute_confidence(
             semantic_distance=dist,
             scope_expansion=expanded,
-            action_count=len(self._confidence_history),
             action_matches_intent=matches_intent,
         )
         self._confidence_history.append(confidence)

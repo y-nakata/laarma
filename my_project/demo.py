@@ -109,12 +109,15 @@ if __name__ == "__main__":
         _calc.compute("warmup", "noop", {})
         print("完了")
 
+    _hmac_secret = os.getenv("AARM_HMAC_SECRET")
     alice = IdentityContext(
         human_principal  = "alice@example.com",
         service_identity = "agent-svc@iam",
         session_id       = "sess_demo",
         privilege_scope  = ["read_file", "write_file", "list_files", "delete_file"],
     )
+    if _hmac_secret:
+        alice = alice.sign(_hmac_secret)
 
     # 本番環境（メンテナンス窓なし）— DEFER/STEP_UP トリガーに使用
     prod_env = EnvironmentContext(

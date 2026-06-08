@@ -24,7 +24,7 @@ class AARMRuntime:
         policy: Policy | None = None,
         model: str | None = None,
         metadata: dict[str, Any] | None = None,
-        skip_intent_alignment: bool = False,
+        _skip_intent_alignment_for_testing: bool = False,
         transform_registry: "dict[str, Any] | None" = None,
     ) -> None:
         self._identity              = identity
@@ -37,7 +37,12 @@ class AARMRuntime:
             confidence_defer_threshold=_policy.confidence_defer_threshold,
             scope_expansion_deny_threshold=_policy.scope_expansion_deny_threshold,
         )
-        self._skip_intent_alignment = skip_intent_alignment
+        if _skip_intent_alignment_for_testing and not os.getenv("AARM_ALLOW_SKIP_INTENT_ALIGNMENT"):
+            raise RuntimeError(
+                "skip_intent_alignment_for_testing は本番環境では使用禁止です。"
+                "テスト目的で使用する場合は AARM_ALLOW_SKIP_INTENT_ALIGNMENT=1 を設定してください。"
+            )
+        self._skip_intent_alignment = _skip_intent_alignment_for_testing
         self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:

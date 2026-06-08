@@ -172,7 +172,7 @@ def run_case(
         model=model,
         policy=policy,
         transform_registry=transform_registry,
-        skip_intent_alignment=(mode == "policy-engine"),
+        _skip_intent_alignment_for_testing=(mode == "policy-engine"),
     )
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])

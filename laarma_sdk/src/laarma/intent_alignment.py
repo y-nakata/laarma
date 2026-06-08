@@ -31,8 +31,14 @@ You receive a JSON object containing:
 - recent_actions    : prior actions executed in this session
 - derived_signals   : signals computed from the session:
     - data_classifications    : sensitivity levels (PUBLIC/PII/CONFIDENTIAL/SENSITIVE_TOOL)
-    - semantic_distance       : drift from user intent (current/average/max; 0.0=aligned, 1.0=unrelated)
-    - scope_expansion_detected: agent accessed resources outside expected scope
+    - semantic_distance       : drift from user intent (0.0=aligned, 1.0=unrelated):
+        current    : distance for the current action
+        average    : session-wide average distance
+        max        : maximum distance seen in session
+        recent_avg : average of last 5 actions (better reflects current drift than session average)
+        drift_trend: current minus average (positive = drifting away, negative = converging)
+    - scope_expansion_detected: any action in session accessed resources outside expected scope
+    - scope_expansion_recent  : scope expansion detected in last 5 actions (more precise recency)
     - action_matches_intent   : whether the user's request explicitly references this tool/target
     - entity_set              : resources referenced in this session
     - confidence_level        : system's confidence in evaluating this action (0.0-1.0)

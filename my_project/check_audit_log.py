@@ -39,7 +39,24 @@ def _compute_hash(entry: dict, secret: str | None) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def check(path: str, secret: str | None, allow_mixed: bool = False) -> bool:
+def _compute_hash_legacy(entry: dict, secret: str | None) -> str:
+    """Issue #45 以前の 5 フィールド形式ハッシュ（後方互換用）。"""
+    payload = json.dumps(
+        {
+            "receipt_id":      entry["receipt_id"],
+            "action":          entry["action"],
+            "decision":        entry["decision"],
+            "reason":          entry["reason"],
+            "modified_params": entry.get("modified_params"),
+        },
+        sort_keys=True, ensure_ascii=False,
+    ).encode()
+    if secret:
+        return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def check(path: str, secret: str | None, allow_mixed: bool = False, legacy: bool = False) -> bool:
     ok = 0
     fail = 0
 
@@ -63,6 +80,11 @@ def check(path: str, secret: str | None, allow_mixed: bool = False) -> bool:
             # 混在ログ対応: HMAC で不一致なら鍵なし SHA-256 でも試みる
             if not matched and allow_mixed and secret:
                 matched = (stored == _compute_hash(entry, None))
+            # レガシー対応: Issue #45 以前の 5 フィールド形式も試みる
+            if not matched and legacy:
+                matched = (stored == _compute_hash_legacy(entry, secret))
+                if not matched and allow_mixed and secret:
+                    matched = (stored == _compute_hash_legacy(entry, None))
 
             if matched:
                 print(f"[OK]   Line {lineno}: receipt_id={rid}... decision={decision}")
@@ -91,6 +113,10 @@ def main() -> None:
         "--allow-mixed", action="store_true",
         help="HMAC 行と鍵なし SHA-256 行が混在するログを許容する（HMAC → SHA-256 の順で試みる）",
     )
+    parser.add_argument(
+        "--legacy", action="store_true",
+        help="Issue #45 以前の 5 フィールド形式ハッシュにも対応する（旧ログの検証用）",
+    )
     args = parser.parse_args()
 
     secret = os.getenv("AARM_HMAC_SECRET")
@@ -98,8 +124,10 @@ def main() -> None:
         print(f"検証モード: HMAC-SHA256 (AARM_HMAC_SECRET 設定済み)")
     else:
         print(f"検証モード: SHA-256 (AARM_HMAC_SECRET 未設定)")
+    if args.legacy:
+        print("レガシーモード: 旧 5 フィールド形式ハッシュにも対応")
 
-    sys.exit(0 if check(args.log_file, secret=secret, allow_mixed=args.allow_mixed) else 1)
+    sys.exit(0 if check(args.log_file, secret=secret, allow_mixed=args.allow_mixed, legacy=args.legacy) else 1)
 
 
 if __name__ == "__main__":

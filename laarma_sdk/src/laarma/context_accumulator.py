@@ -172,20 +172,29 @@ class ContextAccumulator:
         actions = [e for e in self._context.action_history if e.get("type") != "tool_output"]
         return list(reversed(actions[-n:]))
 
+    _DRIFT_WINDOW = 5
+
     def derived_signals(self) -> dict:
         d = self._semantic_distances
         c = self._confidence_history
         current_confidence = c[-1] if c else 1.0
         m = self._action_matches_intent
+        window = d[-self._DRIFT_WINDOW:]
+        recent_avg  = round(sum(window) / len(window), 3) if window else 0.0
+        avg         = sum(d) / len(d) if d else 0.0
+        drift_trend = round(d[-1] - avg, 3) if d else 0.0
         return {
             "data_classifications":     sorted(set(self._data_classifications)),
             "semantic_distance":        {
-                "current": d[-1] if d else 0.0,
-                "average": round(sum(d)/len(d), 3) if d else 0.0,
-                "max":     round(max(d), 3) if d else 0.0,
-                "history": d,
+                "current":    d[-1] if d else 0.0,
+                "average":    round(avg, 3) if d else 0.0,
+                "max":        round(max(d), 3) if d else 0.0,
+                "history":    d,
+                "recent_avg": recent_avg,   # 直近 DRIFT_WINDOW アクションの平均
+                "drift_trend": drift_trend, # current - average（正=平均より遠ざかっている）
             },
             "scope_expansion_detected": any(self._scope_expansions),
+            "scope_expansion_recent":   any(self._scope_expansions[-self._DRIFT_WINDOW:]),
             "action_matches_intent":     m[-1] if m else False,
             "entity_set":               sorted(self._entity_set),
             "confidence_level":         current_confidence,

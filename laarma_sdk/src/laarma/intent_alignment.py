@@ -99,15 +99,9 @@ class IntentAlignment:
     def __init__(
         self,
         model: str | None = None,
-        enable_confidence_deferral: bool = True,
-        confidence_defer_threshold: float = 0.4,
-        scope_expansion_deny_threshold: float = 0.4,
     ) -> None:
         self._model  = model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")
         self._client = None
-        self._enable_confidence_deferral    = enable_confidence_deferral
-        self._confidence_defer_threshold    = confidence_defer_threshold
-        self._scope_expansion_deny_threshold = scope_expansion_deny_threshold
         self._timeout     = float(os.getenv("AARM_LLM_TIMEOUT", "30"))
         self._max_retries = int(os.getenv("AARM_LLM_MAX_RETRIES", "3"))
 
@@ -129,24 +123,7 @@ class IntentAlignment:
         """
         (a, C, E) タプルでアクションを評価する。
         """
-        signals           = context_summary.get("derived_signals", {})
-        confidence        = signals.get("confidence_level", 1.0)
-        semantic_distance = signals.get("semantic_distance", {}).get("current", 0.0)
-        scope_expansion   = signals.get("scope_expansion_detected", False)
-
-        if self._enable_confidence_deferral and confidence < self._confidence_defer_threshold:
-            return AuthorizationResult(
-                decision=Decision.DEFER,
-                reason=f"評価の確信度が不十分です (confidence={confidence})。追加コンテキストが必要です。",
-                action=action,
-            )
-
-        if scope_expansion and semantic_distance > self._scope_expansion_deny_threshold:
-            return AuthorizationResult(
-                decision=Decision.DENY,
-                reason="意図から大きく逸脱し、想定外の範囲拡張が検知されました。",
-                action=action,
-            )
+        signals = context_summary.get("derived_signals", {})
 
         try:
             payload = {

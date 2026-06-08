@@ -62,7 +62,6 @@ def load_policy(path: str | Path) -> Policy:
         for r in data.get("rules", [])
     ]
 
-    evaluation = data.get("evaluation", {})
     dc = data.get("data_classification", {})
 
     def _frozenset_or_none(lst: list | None) -> "frozenset[str] | None":
@@ -73,8 +72,6 @@ def load_policy(path: str | Path) -> Policy:
         required_params={k: list(v) for k, v in data.get("required_params", {}).items()},
         max_actions=int(data.get("max_actions", 50)),
         rules=rules,
-        confidence_defer_threshold=float(evaluation.get("confidence_defer_threshold", 0.4)),
-        scope_expansion_deny_threshold=float(evaluation.get("scope_expansion_deny_threshold", 0.4)),
         pii_keywords=_frozenset_or_none(dc.get("pii_keywords")),
         confidential_keywords=_frozenset_or_none(dc.get("confidential_keywords")),
         sensitive_tools=_frozenset_or_none(dc.get("sensitive_tools")),

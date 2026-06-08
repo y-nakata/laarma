@@ -119,25 +119,6 @@
           "description": "破壊的操作とみなすツール名。context_accumulator での分類に使用。"
         }
       }
-    },
-    "evaluation": {
-      "type": "object",
-      "description": "IntentAlignment へ橋渡しする評価パラメータ。",
-      "additionalProperties": false,
-      "properties": {
-        "confidence_defer_threshold": {
-          "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0,
-          "description": "この値未満の confidence → DEFER。"
-        },
-        "scope_expansion_deny_threshold": {
-          "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0,
-          "description": "scope_expansion 検知かつ semantic_distance がこの値超 → DENY。"
-        }
-      }
     }
   }
 }

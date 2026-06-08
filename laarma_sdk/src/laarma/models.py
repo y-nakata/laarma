@@ -5,8 +5,11 @@ AARM データモデルとコア定数 — 仕様 IV-A2, IV-A3
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 import uuid
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -99,15 +102,22 @@ class AuthorizationResult:
     def _compute_hash(self) -> str:
         payload = json.dumps(
             {
-                "receipt_id":     self.receipt_id,
-                "action":         self.action.to_dict(),
-                "decision":       self.decision.value,
-                "reason":         self.reason,
+                "receipt_id":      self.receipt_id,
+                "action":          self.action.to_dict(),
+                "decision":        self.decision.value,
+                "reason":          self.reason,
                 "modified_params": self.modified_params,
             },
             sort_keys=True, ensure_ascii=False,
+        ).encode()
+        secret = os.getenv("AARM_HMAC_SECRET")
+        if secret:
+            return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+        warnings.warn(
+            "AARM_HMAC_SECRET が未設定です。receipt_hash は改ざん検知に使用できません。",
+            stacklevel=3,
         )
-        return hashlib.sha256(payload.encode()).hexdigest()
+        return hashlib.sha256(payload).hexdigest()
 
     def to_dict(self) -> dict:
         d = {

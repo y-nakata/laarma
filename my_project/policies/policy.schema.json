@@ -2,6 +2,43 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "laarma Policy",
   "description": "laarma_sdk PolicyEngine に読み込まれる静的ポリシー定義",
+  "definitions": {
+    "conditions": {
+      "type": "object",
+      "description": "全て AND 評価。全条件一致でルールが発火する。any_of / none_of で OR / NOT も記述可能。",
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "一致させるツール名。"
+        },
+        "environment_type": {
+          "type": "string",
+          "enum": ["production", "staging", "development"],
+          "description": "一致させる環境種別。"
+        },
+        "not_in_maintenance_window": {
+          "type": "boolean",
+          "description": "true のとき、メンテナンス窓外の場合のみマッチ。"
+        },
+        "param_matches": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "パラメータ名 → 正規表現パターン のマップ。全て一致でマッチ。"
+        },
+        "any_of": {
+          "type": "array",
+          "description": "いずれか1つが一致すれば通過（OR）。各要素は conditions オブジェクトと同構造。",
+          "items": { "$ref": "#/definitions/conditions" }
+        },
+        "none_of": {
+          "type": "array",
+          "description": "すべて不一致なら通過（NOT）。各要素は conditions オブジェクトと同構造。",
+          "items": { "$ref": "#/definitions/conditions" }
+        }
+      }
+    }
+  },
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -44,31 +81,7 @@
             "type": "string",
             "description": "決定理由のテンプレート文字列。{param_name} でアクションパラメータを参照可能。"
           },
-          "conditions": {
-            "type": "object",
-            "description": "全て AND 評価。全条件一致でルールが発火する。",
-            "additionalProperties": false,
-            "properties": {
-              "tool": {
-                "type": "string",
-                "description": "一致させるツール名。"
-              },
-              "environment_type": {
-                "type": "string",
-                "enum": ["production", "staging", "development"],
-                "description": "一致させる環境種別。"
-              },
-              "not_in_maintenance_window": {
-                "type": "boolean",
-                "description": "true のとき、メンテナンス窓外の場合のみマッチ。"
-              },
-              "param_matches": {
-                "type": "object",
-                "additionalProperties": { "type": "string" },
-                "description": "パラメータ名 → 正規表現パターン のマップ。全て一致でマッチ。"
-              }
-            }
-          },
+          "conditions": { "$ref": "#/definitions/conditions" },
           "modify_transform": {
             "type": "object",
             "additionalProperties": {
@@ -77,6 +90,33 @@
             },
             "description": "MODIFY 時のパラメータ変換。パラメータ名 → 変換名 (_TRANSFORM_REGISTRY のキー)。"
           }
+        }
+      }
+    },
+    "data_classification": {
+      "type": "object",
+      "description": "データ分類キーワード。省略するとデフォルト値を使用。",
+      "additionalProperties": false,
+      "properties": {
+        "pii_keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "PII と見なすキーワード。ツール名・パラメータに含まれると PII 分類される。"
+        },
+        "confidential_keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CONFIDENTIAL と見なすキーワード。"
+        },
+        "sensitive_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "SENSITIVE_TOOL 分類するツール名。"
+        },
+        "destructive_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "破壊的操作とみなすツール名。context_accumulator での分類に使用。"
         }
       }
     },
@@ -89,7 +129,7 @@
           "type": "number",
           "minimum": 0.0,
           "maximum": 1.0,
-          "description": "この値未満の confidence かつ非 READ_ONLY アクション → DEFER。"
+          "description": "この値未満の confidence → DEFER。"
         },
         "scope_expansion_deny_threshold": {
           "type": "number",

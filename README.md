@@ -124,10 +124,33 @@ python my_project/demo.py
 
 メモリ内のレシートは `runtime.receipts`（`list[dict]`）で参照できます。
 
+### HMAC 署名鍵の設定
+
+`AARM_HMAC_SECRET` を設定すると `receipt_hash` と `identity_token` が HMAC-SHA256 で保護されます。
+
+```bash
+# 鍵を生成して環境変数に設定（毎回変わるため、固定値を .env 等に保存して使うこと）
+export AARM_HMAC_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+# または
+export AARM_HMAC_SECRET=$(openssl rand -hex 32)
+```
+
+**重要な注意点**:
+- 鍵は**固定して使い続ける**必要があります。鍵を変えると過去のレシートの `receipt_hash` が検証できなくなります。
+- `.env` ファイルに保存する場合は `.gitignore` に追加してください（公開リポジトリへの漏洩防止）。
+- ログ生成途中で鍵を設定・変更すると、鍵なし SHA-256 行と HMAC 行が混在します。混在ログの検証は `--allow-mixed` オプションを使用してください。
+
 ### 改ざんチェック
 
 ```bash
+# 鍵なし（SHA-256 で検証）
 python my_project/check_audit_log.py aarm_audit.jsonl
+
+# 鍵あり（HMAC-SHA256 で検証）
+AARM_HMAC_SECRET=your_secret python my_project/check_audit_log.py aarm_audit.jsonl
+
+# 混在ログ（鍵あり行・鍵なし行が混在する場合）
+AARM_HMAC_SECRET=your_secret python my_project/check_audit_log.py --allow-mixed aarm_audit.jsonl
 ```
 
 各エントリの `receipt_hash` を再計算して一致を検証します（終了コード 1 で不一致報告）。

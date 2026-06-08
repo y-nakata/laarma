@@ -128,11 +128,19 @@ class AuthorizationResult:
     def _compute_hash(self) -> str:
         payload = json.dumps(
             {
-                "receipt_id":      self.receipt_id,
-                "action":          self.action.to_dict(),
-                "decision":        self.decision.value,
-                "reason":          self.reason,
-                "modified_params": self.modified_params,
+                "receipt_id":         self.receipt_id,
+                "action":             self.action.to_dict(),
+                "decision":           self.decision.value,
+                "reason":             self.reason,
+                "modified_params":    self.modified_params,
+                "decision_source":    self.decision_source,
+                "policy_rule_id":     self.policy_rule_id,
+                "deferral_reason":    self.deferral_reason,
+                "resolution_method":  self.resolution_method,
+                "resolution_timestamp": (
+                    self.resolution_timestamp.isoformat()
+                    if self.resolution_timestamp else None
+                ),
             },
             sort_keys=True, ensure_ascii=False,
         ).encode()

@@ -3,7 +3,23 @@
 AARM (Autonomous Action Runtime Management) の Python 試作実装です。
 [CSA AARM 仕様](https://aarm.dev/spec) に基づき、AI エージェントのアクションを実行前にインターセプト・評価・記録するランタイムを実装します。
 
-## 構成
+> **位置づけ**: 本リポジトリは AARM 仕様を学びながら実装を追うための**検証段階の試作実装**です。
+
+## 目次
+
+- [これは何か](#これは何か)（概要・構成・層の分離）
+- [どう動くか](#aarm-処理フロー)（処理フロー）
+- [仕様準拠状況](#aarm-仕様準拠状況)（R1–R9）
+- [デモで体感する](#デモシナリオ)
+- [詳しい使い方](#詳しい使い方docs)（セットアップ・設定・運用）
+
+---
+
+## これは何か
+
+AARM は、AI エージェントが外部システムへ働きかける「アクション」を、実行される直前にインターセプトし、静的ポリシーと意図整合性の両面から評価して、許可・拒否・改変・保留・承認要求のいずれかを決定し、改ざん耐性のあるレシートとして記録する、ランタイムセキュリティの枠組みです。laarma はその仕様の Python 実装です。
+
+### 構成
 
 ```
 laarma/
@@ -31,7 +47,7 @@ laarma/
         └── policy.yaml  # PAP — 静的ポリシー定義
 ```
 
-## 層の分離
+### 層の分離
 
 | 層 | laarma を知るか | 役割 |
 |---|---|---|
@@ -41,208 +57,44 @@ laarma/
 | `my_project/demo.py` | 知っている | laarma をセットアップしてエージェントに注入 |
 | `my_project/policies/policy.yaml` | — | PAP — 静的ポリシー定義（SDK 外で管理） |
 
-## セットアップ
+## AARM 処理フロー
 
-```bash
-pip install -e laarma_sdk
-export ANTHROPIC_API_KEY=your_api_key
-python my_project/demo.py
+```
+エージェントがツールを呼び出そうとする
+    ↓ proxy.call()           エージェントにはただのツール実行に見える
+[AARMToolProxy]
+    ↓ runtime.intercept()
+[AARMRuntime]
+    ↓ PolicyEngine           静的ルールで「確実にアウト」なものだけ弾く
+    ↓ None の場合
+[IntentAlignment]            Claude が (action, context, environment) で動的判断
+    ↓ ALLOW / DENY / MODIFY
+    ↓ DEFER   → [DeferralResolver]  追加コンテキスト収集 → ALLOW / DENY / STEP_UP に再評価
+    ↓ STEP_UP → [StepUpResolver]    承認者に提示 → 承認: ALLOW / 拒否: DENY
+実ツール実行 or ToolBlocked 例外
 ```
 
-## 環境変数
+## AARM 仕様準拠状況
 
-| 変数 | デフォルト | 説明 |
-|------|---------|------|
-| `ANTHROPIC_API_KEY` | — | 必須 |
-| `AARM_MODEL` | `claude-sonnet-4-6` | IntentAlignment / DeferralResolver が使うモデル |
-| `AARM_LLM_TIMEOUT` | `30` | LLM 呼び出しタイムアウト（秒） |
-| `AARM_LLM_MAX_RETRIES` | `3` | LLM 呼び出し失敗時の最大リトライ回数 |
-| `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword` |
-| `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名。日本語の意図文と英語のツール名を言語間で比較するため多言語モデルが必要 |
-| `AARM_AUDIT_LOG_PATH` | — | 監査ログ（Receipt）の出力先ファイルパス（省略で永続化なし） |
-| `AARM_HMAC_SECRET` | — | receipt_hash および identity_token の HMAC-SHA256 署名鍵。未設定時は警告のみ（フォールバック: 鍵なし SHA-256） |
-| `HF_TOKEN` | — | Hugging Face 認証トークン。設定すると HF Hub への認証済みリクエストになり未認証警告が消える（未設定でもダウンロード・動作は可能） |
+仕様（R1–R6 MUST / R7–R9 SHOULD）に対する現在の準拠状況:
 
-## Embedding モデルの切り替え
+| 要件 | 区分 | 実装状況 | 説明 |
+|------|------|---------|------|
+| R1 事前インターセプト | MUST | ✅ | `AARMToolProxy` が全ツール呼び出しを仲介 |
+| R2 コンテキスト蓄積 | MUST | ✅ | `ContextAccumulator` が Cn = Cn-1 ∪ {an, on, δn} を維持 |
+| R3 意図整合性評価 | MUST | ✅ | `PolicyEngine`（静的）+ `IntentAlignment`（動的 LLM）の二層評価 |
+| R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
+| R5 改ざん耐性レシート | MUST | ✅ | `AARM_HMAC_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
+| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装 |
+| R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` に `recent_avg`・`drift_trend`・`scope_expansion_recent` を追加 |
+| R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
+| R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価 |
 
-`AARM_EMBEDDING_MODEL` で sentence-transformers の任意のモデルに切り替えられます。
-
-```bash
-export AARM_EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
-python my_project/demo.py
-```
-
-### 動作確認済みモデルと比較
-
-以下は日本語の意図文と英語のツール名で測定した semantic distance の比較です（距離 0.0=一致 / 1.0=無関係）。
-
-| 意図文 | ツール | MiniLM-L12-v2 (デフォルト) | mpnet-base-v2 | 正解方向 |
-|---|---|---|---|---|
-| 不要なファイルを削除して | delete_file | **0.323** | 0.312 | 低いほど良い |
-| README を読んで教えて | delete_file | 0.545 | **0.660** | 高いほど良い（意図外検知） |
-| ファイルに書き出して | write_file | **0.365** | 0.522 | 低いほど良い |
-| README を読んで教えて | read_file | **0.337** | 0.352 | 低いほど良い |
-| メールを送って | send_email | **0.296** | 0.391 | 低いほど良い |
-| メールを送って | delete_file | **0.919** | 0.823 | 高いほど良い（意図外検知） |
-
-mpnet は意図外操作の検知感度が高い一方、日本語意図文 ↔ 英語ツール名の正方向マッピング精度は MiniLM がやや優勢。デフォルトは MiniLM を維持。
-
-## 監査ログ（Receipt）の永続化
-
-`AARM_AUDIT_LOG_PATH` を設定すると、全インターセプト結果を JSONL 形式でアペンド保存します。
-
-```bash
-export AARM_AUDIT_LOG_PATH=./aarm_audit.jsonl
-python my_project/demo.py
-```
-
-各行は `AuthorizationResult.to_dict()` のシリアライズ結果です:
-
-```json
-{
-  "receipt_id": "...",
-  "receipt_hash": "sha256...",
-  "session_id": "sess_demo",
-  "decision": "DENY",
-  "reason": "意図外の削除操作のため遮断。",
-  "action": {"tool_name": "delete_file", "parameters": {"path": "tmp.txt"}, "...": "..."},
-  "modified_params": null,
-  "timestamp": "2026-06-07T12:00:00+00:00",
-  "resolution_method": null
-}
-```
-
-`resolution_method` の値:
-
-| 値 | 意味 |
-|---|---|
-| `null` | 直接判断（DEFER/STEP_UP 経由なし） |
-| `"autonomous"` | DeferralResolver が自律解決（ALLOW/DENY） |
-| `"step_up"` | DeferralResolver が STEP_UP へ格上げ |
-| `"human_approved"` | StepUpResolver で人間が承認 |
-| `"human_denied"` | StepUpResolver で人間が拒否 |
-
-メモリ内のレシートは `runtime.receipts`（`list[dict]`）で参照できます。
-
-### HMAC 署名鍵の設定
-
-`AARM_HMAC_SECRET` を設定すると `receipt_hash` と `identity_token` が HMAC-SHA256 で保護されます。
-
-```bash
-# 鍵を生成して環境変数に設定（毎回変わるため、固定値を .env 等に保存して使うこと）
-export AARM_HMAC_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
-# または
-export AARM_HMAC_SECRET=$(openssl rand -hex 32)
-```
-
-**重要な注意点**:
-- 鍵は**固定して使い続ける**必要があります。鍵を変えると過去のレシートの `receipt_hash` が検証できなくなります。
-- `.env` ファイルに保存する場合は `.gitignore` に追加してください（公開リポジトリへの漏洩防止）。
-- ログ生成途中で鍵を設定・変更すると、鍵なし SHA-256 行と HMAC 行が混在します。混在ログの検証は `--allow-mixed` オプションを使用してください。
-
-### 改ざんチェック
-
-```bash
-# 鍵なし（SHA-256 で検証）
-python my_project/check_audit_log.py aarm_audit.jsonl
-
-# 鍵あり（HMAC-SHA256 で検証）
-AARM_HMAC_SECRET=your_secret python my_project/check_audit_log.py aarm_audit.jsonl
-
-# 混在ログ（鍵あり行・鍵なし行が混在する場合）
-AARM_HMAC_SECRET=your_secret python my_project/check_audit_log.py --allow-mixed aarm_audit.jsonl
-```
-
-各エントリの `receipt_hash` を再計算して一致を検証します（終了コード 1 で不一致報告）。
-
-> **注: `AARM_HMAC_SECRET` 未設定時の限界**  
-> `AARM_HMAC_SECRET` が未設定の場合、`receipt_hash` は鍵なし SHA-256 で計算されるため、
-> 攻撃者が同じアルゴリズムでハッシュを再計算・差し替えた場合の改ざんは検出できません。
-> 本番環境では必ず `AARM_HMAC_SECRET` を設定してください。
-
-## PAP（Policy Administration Point）
-
-静的ポリシーは `my_project/policies/policy.yaml` で定義します。PAP はポリシーの定義・管理を担うコンポーネントであり、SDK 本体（PDP）とは分離して置かれます。`load_policy()` でファイルを読み込み SDK に注入します。
-
-```python
-from laarma import AARMRuntime, load_policy
-
-policy = load_policy("my_project/policies/policy.yaml")
-runtime = AARMRuntime(user_intent=..., policy=policy, transform_registry=...)
-```
-
-`policy.yaml` の主要キー:
-
-| キー | 説明 |
-|-----|------|
-| `denied_tools` | 絶対禁止ツール。呼び出されると即 DENY |
-| `required_params` | ツールごとの必須パラメータ。不足時は DEFER |
-| `max_actions` | セッション内の最大アクション数。超過時は DENY |
-| `rules` | 追加の静的ルール（DENY / DEFER / MODIFY）。条件にマッチした最初のルールを適用 |
-
-`rules` の各エントリは `conditions`（ツール名・環境・パラメータ正規表現）と `decision` を持ちます。`MODIFY` ルールはさらに `modify_transform` でパラメータ変換を指定できます（変換関数は `transform_registry` として呼び出し側が提供）。
-
-## AARMRuntime 単独使用時の DEFER ハンドリング
-
-`AARMToolProxy` を使わず `AARMRuntime.intercept()` を直接呼び出す場合、
-DEFER が返ったときの再評価処理は呼び出し側が担う。
-
-```python
-from laarma import AARMRuntime, Decision
-from laarma.deferral import DeferralResolver
-
-runtime = AARMRuntime(user_intent="...", ...)
-result = runtime.intercept("delete_file", {"path": "tmp.txt"})
-
-if result.decision == Decision.DEFER:
-    resolver = DeferralResolver()
-    resolved = resolver.resolve(result, runtime.context_summary)
-    runtime.record_deferred_resolution(resolved)
-    result = resolved
-
-# result.decision は ALLOW / MODIFY / DENY / STEP_UP のいずれか
-if result.decision == Decision.ALLOW:
-    ...  # ツールを実行
-elif result.decision == Decision.DENY:
-    ...  # ブロック
-```
-
-`DeferralResolver.resolve()` は ALLOW / DENY / STEP_UP を返す（DEFER は返さない）。
-STEP_UP になった場合は `StepUpResolver` で人間承認フローに進むか、DENY として扱う。
-
-`AARMToolProxy` を使う場合はこのハンドリングが自動化されており、呼び出し側は
-`proxy.call()` の戻り値か `ToolBlocked` 例外だけを意識すればよい。
-
-## ベンチマーク
-
-`my_project/benchmark.py` と `my_project/benchmark_data.jsonl` を使って、各層の挙動を評価できます。
-
-```bash
-pip install -e laarma_sdk
-export ANTHROPIC_API_KEY=your_api_key
-python my_project/benchmark.py
-```
-
-3 つのモードで層を独立して評価できます:
-
-| モード | フラグ | LLM | 用途 |
-|-------|-------|-----|------|
-| `pipeline`（デフォルト） | なし | あり | PolicyEngine + IntentAlignment 結合テスト |
-| `policy-engine` | `--mode policy-engine` | なし（高速） | 静的ルールの決定論的回帰テスト |
-| `intent-alignment` | `--pure-intent-alignment` | あり | LLM の生の意図判断精度測定（不一致は情報的出力のみ） |
-
-```bash
-# モデルを指定
-python my_project/benchmark.py --model claude-sonnet-4-6
-
-# 静的ルールのみ（LLM コールなし）
-python my_project/benchmark.py --mode policy-engine
-
-# LLM の生判断を測定
-python my_project/benchmark.py --pure-intent-alignment
-```
+凡例: ✅ 準拠 / ⚠️ 部分準拠（MUST 差異あり）/ 🔶 部分実装 / ❌ 未実装
 
 ## デモシナリオ
+
+セットアップ後 `python my_project/demo.py` で、AARM の挙動を 9 シナリオで体感できます。
 
 | シナリオ | リクエスト | 期待される判断 | ポイント |
 |---|---|---|---|
@@ -263,39 +115,15 @@ python my_project/benchmark.py --pure-intent-alignment
 > 現実の LLM は危険な操作を確認なしに自発的に実行しないため、AARM の意図外検知・曖昧さ検知の
 > 動作を安定して示すための意図的な仕掛けです。実運用コードではありません。
 
-## AARM 処理フロー
+## 詳しい使い方（docs/）
 
-```
-エージェントがツールを呼び出そうとする
-    ↓ proxy.call()           エージェントにはただのツール実行に見える
-[AARMToolProxy]
-    ↓ runtime.intercept()
-[AARMRuntime]
-    ↓ PolicyEngine           静的ルールで「確実にアウト」なものだけ弾く
-    ↓ None の場合
-[IntentAlignment]            Claude が (action, context, environment) で動的判断
-    ↓ ALLOW / DENY / MODIFY
-    ↓ DEFER   → [DeferralResolver]  追加コンテキスト収集 → ALLOW / DENY / STEP_UP に再評価
-    ↓ STEP_UP → [StepUpResolver]    承認者に提示 → 承認: ALLOW / 拒否: DENY
-実ツール実行 or ToolBlocked 例外
-```
+セットアップや各機能の詳細は `docs/` を参照してください。
 
-## 現状と今後の課題
-
-### AARM 仕様準拠状況
-
-本リポジトリは**検証段階の試作実装**です。仕様（R1–R6 MUST / R7–R9 SHOULD）に対する現在の準拠状況:
-
-| 要件 | 区分 | 実装状況 | 説明 |
-|------|------|---------|------|
-| R1 事前インターセプト | MUST | ✅ | `AARMToolProxy` が全ツール呼び出しを仲介 |
-| R2 コンテキスト蓄積 | MUST | ✅ | `ContextAccumulator` が Cn = Cn-1 ∪ {an, on, δn} を維持 |
-| R3 意図整合性評価 | MUST | ✅ | `PolicyEngine`（静的）+ `IntentAlignment`（動的 LLM）の二層評価 |
-| R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
-| R5 改ざん耐性レシート | MUST | ✅ | `AARM_HMAC_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
-| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装 |
-| R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` に `recent_avg`・`drift_trend`・`scope_expansion_recent` を追加 |
-| R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
-| R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価 |
-
-凡例: ✅ 準拠 / ⚠️ 部分準拠（MUST 差異あり）/ 🔶 部分実装 / ❌ 未実装
+| ドキュメント | 内容 |
+|---|---|
+| [docs/SETUP.md](docs/SETUP.md) | セットアップ手順・環境変数リファレンス |
+| [docs/POLICY.md](docs/POLICY.md) | PAP（`policy.yaml`）の書き方 |
+| [docs/AUDIT.md](docs/AUDIT.md) | 監査ログの永続化・改ざんチェック・HMAC 署名鍵の設定 |
+| [docs/EMBEDDING.md](docs/EMBEDDING.md) | Embedding モデルの切り替えと比較 |
+| [docs/BENCHMARK.md](docs/BENCHMARK.md) | ベンチマークの使い方 |
+| [docs/ADVANCED.md](docs/ADVANCED.md) | AARMRuntime 単独使用時の DEFER ハンドリング |

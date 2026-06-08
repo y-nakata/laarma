@@ -124,15 +124,12 @@ def _build_policy(mode: str) -> tuple[Policy, dict]:
         return load_policy(policy_path), _TRANSFORM_REGISTRY
 
     if mode == "intent-alignment":
-        # PolicyEngine の configurable rules を空にし、confidence/scope pre-check を無効化。
-        # denied_tools は安全上の理由で残す。
+        # PolicyEngine の configurable rules を空にする。denied_tools は安全上の理由で残す。
         policy = Policy(
             denied_tools=set(DEFAULT_POLICY.denied_tools),
             required_params={},
             max_actions=999,
             rules=[],
-            confidence_defer_threshold=0.0,      # confidence DEFER pre-check 無効
-            scope_expansion_deny_threshold=1.01,  # scope expansion DENY pre-check 無効
         )
         return policy, {}
 

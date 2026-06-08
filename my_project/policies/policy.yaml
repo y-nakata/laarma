@@ -135,7 +135,3 @@ data_classification:
     - delete_all_records
     - execute_shell
 
-# IntentAlignment へ橋渡しする評価パラメータ
-evaluation:
-  confidence_defer_threshold: 0.4     # この値未満の confidence かつ非 READ_ONLY → DEFER
-  scope_expansion_deny_threshold: 0.4  # scope_expansion かつ semantic_distance がこの値超 → DENY

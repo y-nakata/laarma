@@ -34,8 +34,6 @@ class AARMRuntime:
         self._policy_engine         = PolicyEngine(policy=_policy, transform_registry=transform_registry)
         self._intent_alignment      = IntentAlignment(
             model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),
-            confidence_defer_threshold=_policy.confidence_defer_threshold,
-            scope_expansion_deny_threshold=_policy.scope_expansion_deny_threshold,
         )
         if _skip_intent_alignment_for_testing and not os.getenv("AARM_ALLOW_SKIP_INTENT_ALIGNMENT"):
             raise RuntimeError(

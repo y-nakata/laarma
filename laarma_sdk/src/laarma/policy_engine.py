@@ -88,9 +88,6 @@ class Policy:
     required_params:                dict[str, list[str]] = field(default_factory=dict)
     max_actions:                    int                  = 50
     rules:                          list[StaticRule]     = field(default_factory=list)
-    # IntentAlignment へ橋渡しする評価パラメータ（Policy に同居させることで一元管理）
-    confidence_defer_threshold:     float                = 0.4
-    scope_expansion_deny_threshold: float                = 0.4
     # データ分類キーワード（省略時は context_accumulator.py のデフォルト値を使う）
     pii_keywords:          frozenset[str] | None = None
     confidential_keywords: frozenset[str] | None = None

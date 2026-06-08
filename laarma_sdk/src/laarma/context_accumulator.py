@@ -66,40 +66,31 @@ def _action_matches_intent(user_intent: str, tool_name: str, parameters: dict) -
 
 def _compute_confidence(
     semantic_distance: float,
-    data_classifications: list[str],
     scope_expansion: bool,
     action_count: int,
-    is_destructive: bool,
     action_matches_intent: bool,
 ) -> float:
     """
     確信度を 0.0 (全く評価できない) 〜 1.0 (完全に評価できる) で算出する。
+    AARM 仕様 §IV-C: confidence は「(a, C) を自信を持って評価できる度合い」であり、
+    アクションの危険度ではない。危険度は data_classification シグナルと
+    IntentAlignment（STEP_UP / DENY）が担う。
     0.4 未満 → DEFER のトリガーになる。
     """
     score = 1.0
 
-    # 意味的距離が高いはど不確か
+    # 意味的距離が高いほど評価が困難
     score -= semantic_distance * 0.3
 
-    # PII/CONFIDENTIAL が混在すると確信度低下
-    if "PII" in data_classifications:
-        score -= 0.15
-    if "CONFIDENTIAL" in data_classifications:
-        score -= 0.15
-
-    # スコープ拡張は確信度を大きく下げる
+    # スコープ拡張は想定外のコンテキストであり評価が困難
     if scope_expansion:
         score -= 0.25
 
-    # 破壊的操作は確信度を下げる
-    if is_destructive:
-        score -= 0.1
-
-    # 意図と一致するアクションなら確信度を高める
+    # 明示的な意図との一致があれば評価しやすい
     if action_matches_intent:
         score += 0.1
 
-    # 初回アクションはコンテキストが少ないので評価下げ
+    # 初回アクションはセッションコンテキストが不足
     if action_count == 0:
         score -= 0.1
 
@@ -152,10 +143,8 @@ class ContextAccumulator:
 
         confidence = _compute_confidence(
             semantic_distance=dist,
-            data_classifications=classifications,
             scope_expansion=expanded,
             action_count=len(self._confidence_history),
-            is_destructive=action.tool_name in self._destructive_tools,
             action_matches_intent=matches_intent,
         )
         self._confidence_history.append(confidence)

@@ -55,7 +55,25 @@ class AARMRuntime:
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """
         アクションをインターセプトして認可判断を返す。
-        DEFER の場合はここではそのまま返す。解決ワークフローは ToolProxy が担当。
+
+        Returns:
+            AuthorizationResult。decision の値によって呼び出し側の責務が異なる:
+
+            - ALLOW / MODIFY : ツールを実行してよい。
+            - DENY           : ツールをブロックすること。
+            - STEP_UP        : 人間の承認が必要。StepUpResolver を使うか DENY として扱う。
+            - DEFER          : 追加コンテキストによる再評価が必要。
+                AARMToolProxy を使っている場合は DeferralResolver が自動処理する。
+                直接 AARMRuntime を使う場合は以下のパターンで手動ハンドリングすること::
+
+                    from laarma.deferral import DeferralResolver
+                    result = runtime.intercept(tool_name, params)
+                    if result.decision == Decision.DEFER:
+                        resolver = DeferralResolver()
+                        resolved = resolver.resolve(result, runtime.context_summary)
+                        runtime.record_deferred_resolution(resolved)
+                        result = resolved
+                    # result.decision は ALLOW / MODIFY / DENY / STEP_UP のいずれか
         """
         action = Action(
             tool_name=tool_name,

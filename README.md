@@ -60,6 +60,7 @@ python my_project/demo.py
 | `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword` |
 | `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名。日本語の意図文と英語のツール名を言語間で比較するため多言語モデルが必要 |
 | `AARM_AUDIT_LOG_PATH` | — | 監査ログ（Receipt）の出力先ファイルパス（省略で永続化なし） |
+| `AARM_HMAC_SECRET` | — | receipt_hash および identity_token の HMAC-SHA256 署名鍵。未設定時は警告のみ（フォールバック: 鍵なし SHA-256） |
 | `HF_TOKEN` | — | Hugging Face 認証トークン。設定すると HF Hub への認証済みリクエストになり未認証警告が消える（未設定でもダウンロード・動作は可能） |
 
 ## Embedding モデルの切り替え
@@ -131,10 +132,10 @@ python my_project/check_audit_log.py aarm_audit.jsonl
 
 各エントリの `receipt_hash` を再計算して一致を検証します（終了コード 1 で不一致報告）。
 
-> **注: このチェックの限界**  
-> `receipt_hash` は鍵なし SHA-256 であるため、攻撃者が同じアルゴリズムでハッシュを
-> 再計算・差し替えた場合の改ざんは検出できません。偶発的破損および
-> ハッシュアルゴリズムを知らない素朴な改ざんの抑止を目的とした実装です。
+> **注: `AARM_HMAC_SECRET` 未設定時の限界**  
+> `AARM_HMAC_SECRET` が未設定の場合、`receipt_hash` は鍵なし SHA-256 で計算されるため、
+> 攻撃者が同じアルゴリズムでハッシュを再計算・差し替えた場合の改ざんは検出できません。
+> 本番環境では必ず `AARM_HMAC_SECRET` を設定してください。
 
 ## PAP（Policy Administration Point）
 
@@ -155,9 +156,39 @@ runtime = AARMRuntime(user_intent=..., policy=policy, transform_registry=...)
 | `required_params` | ツールごとの必須パラメータ。不足時は DEFER |
 | `max_actions` | セッション内の最大アクション数。超過時は DENY |
 | `rules` | 追加の静的ルール（DENY / DEFER / MODIFY）。条件にマッチした最初のルールを適用 |
-| `evaluation` | IntentAlignment へ渡す閾値（`confidence_defer_threshold` など） |
 
 `rules` の各エントリは `conditions`（ツール名・環境・パラメータ正規表現）と `decision` を持ちます。`MODIFY` ルールはさらに `modify_transform` でパラメータ変換を指定できます（変換関数は `transform_registry` として呼び出し側が提供）。
+
+## AARMRuntime 単独使用時の DEFER ハンドリング
+
+`AARMToolProxy` を使わず `AARMRuntime.intercept()` を直接呼び出す場合、
+DEFER が返ったときの再評価処理は呼び出し側が担う。
+
+```python
+from laarma import AARMRuntime, Decision
+from laarma.deferral import DeferralResolver
+
+runtime = AARMRuntime(user_intent="...", ...)
+result = runtime.intercept("delete_file", {"path": "tmp.txt"})
+
+if result.decision == Decision.DEFER:
+    resolver = DeferralResolver()
+    resolved = resolver.resolve(result, runtime.context_summary)
+    runtime.record_deferred_resolution(resolved)
+    result = resolved
+
+# result.decision は ALLOW / MODIFY / DENY / STEP_UP のいずれか
+if result.decision == Decision.ALLOW:
+    ...  # ツールを実行
+elif result.decision == Decision.DENY:
+    ...  # ブロック
+```
+
+`DeferralResolver.resolve()` は ALLOW / DENY / STEP_UP を返す（DEFER は返さない）。
+STEP_UP になった場合は `StepUpResolver` で人間承認フローに進むか、DENY として扱う。
+
+`AARMToolProxy` を使う場合はこのハンドリングが自動化されており、呼び出し側は
+`proxy.call()` の戻り値か `ToolBlocked` 例外だけを意識すればよい。
 
 ## ベンチマーク
 
@@ -238,10 +269,10 @@ python my_project/benchmark.py --pure-intent-alignment
 | R2 コンテキスト蓄積 | MUST | ✅ | `ContextAccumulator` が Cn = Cn-1 ∪ {an, on, δn} を維持 |
 | R3 意図整合性評価 | MUST | ✅ | `PolicyEngine`（静的）+ `IntentAlignment`（動的 LLM）の二層評価 |
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
-| R5 改ざん耐性レシート | MUST | ⚠️ | `receipt_hash` は鍵なし SHA-256（完全な tamper-evident 要件は未達） |
-| R6 アイデンティティバインディング | MUST | ⚠️ | ハッシュペイロードに identity を含むが非対称署名なし（non-repudiation 未達） |
-| R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` 計算あり・直近 5 アクションに限定 |
+| R5 改ざん耐性レシート | MUST | ✅ | `AARM_HMAC_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
+| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装 |
+| R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` に `recent_avg`・`drift_trend`・`scope_expansion_recent` を追加 |
 | R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
-| R9 最小権限強制 | SHOULD | ❌ | `privilege_scope` フィールドあり・評価エンジン未組み込み |
+| R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価 |
 
 凡例: ✅ 準拠 / ⚠️ 部分準拠（MUST 差異あり）/ 🔶 部分実装 / ❌ 未実装

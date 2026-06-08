@@ -84,6 +84,9 @@ class AuthorizationResult:
     receipt_id:            str             = field(default_factory=lambda: str(uuid.uuid4()))
     modified_params:       dict | None     = None
     timestamp:             datetime        = field(default_factory=lambda: datetime.now(timezone.utc))
+    # ポリシー参照 — 仕様 R5: "receipt must include the policy context used in evaluation"
+    policy_rule_id:        str | None      = None   # 発火した StaticRule.id (PolicyEngine のみ)
+    decision_source:       str             = "intent_alignment"  # "policy_engine" | "denied_tools" | "privilege_scope" | "intent_alignment"
     # DEFER ワークフロー用フィールド
     deferral_reason:       str | None      = None
     resolution_method:     str | None      = None  # "autonomous" | "step_up" | None
@@ -115,7 +118,10 @@ class AuthorizationResult:
             "action":               self.action.to_dict(),
             "modified_params":      self.modified_params,
             "timestamp":            self.timestamp.isoformat(),
+            "decision_source":      self.decision_source,
         }
+        if self.policy_rule_id:
+            d["policy_rule_id"] = self.policy_rule_id
         if self.deferral_reason:
             d["deferral_reason"]      = self.deferral_reason
         if self.resolution_method:

@@ -141,6 +141,7 @@ class PolicyEngine:
                     decision=Decision.DENY,
                     reason=f"'{action.tool_name}' は privilege_scope 外のツールです。",
                     action=action,
+                    decision_source="privilege_scope",
                 )
 
         # 1. 絶対禁止ツールの判定（Policy Engine 本来の責務）
@@ -149,6 +150,7 @@ class PolicyEngine:
                 decision=Decision.DENY,
                 reason=f"'{action.tool_name}' はポリシーにより絶対禁止です。",
                 action=action,
+                decision_source="denied_tools",
             )
 
         # 2. 設定ファイルから差し込まれたルールを評価
@@ -163,6 +165,7 @@ class PolicyEngine:
                 decision=Decision.DEFER,
                 reason=f"'{action.tool_name}' に必須パラメータが足りません: {missing}",
                 action=action,
+                decision_source="policy_engine",
             )
 
         # 4. 最大アクション数の制限（Policy Engine 本来の責務）
@@ -172,6 +175,7 @@ class PolicyEngine:
                 decision=Decision.DENY,
                 reason=f"アクション数上限 ({p.max_actions}) に達しました。",
                 action=action,
+                decision_source="policy_engine",
             )
 
         return None  # 動的評価層（Intent Alignment）へ委譲
@@ -202,12 +206,20 @@ class PolicyEngine:
                     reason=reason,
                     action=action,
                     modified_params=modified_params,
+                    policy_rule_id=rule.id,
+                    decision_source="policy_engine",
                 )
 
             try:
                 reason = rule.reason.format(**action.parameters)
             except (KeyError, ValueError):
                 reason = rule.reason
-            return AuthorizationResult(decision=decision, reason=reason, action=action)
+            return AuthorizationResult(
+                decision=decision,
+                reason=reason,
+                action=action,
+                policy_rule_id=rule.id,
+                decision_source="policy_engine",
+            )
 
         return None

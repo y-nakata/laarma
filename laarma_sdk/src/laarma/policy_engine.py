@@ -134,6 +134,15 @@ class PolicyEngine:
     ) -> AuthorizationResult | None:
         p = self._policy
 
+        # 0. privilege_scope チェック（空リストは無制限 — 後方互換）
+        if action.identity and action.identity.privilege_scope:
+            if action.tool_name not in action.identity.privilege_scope:
+                return AuthorizationResult(
+                    decision=Decision.DENY,
+                    reason=f"'{action.tool_name}' は privilege_scope 外のツールです。",
+                    action=action,
+                )
+
         # 1. 絶対禁止ツールの判定（Policy Engine 本来の責務）
         if action.tool_name in p.denied_tools:
             return AuthorizationResult(

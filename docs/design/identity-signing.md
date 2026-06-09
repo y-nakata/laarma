@@ -81,17 +81,34 @@ identity_token:   str | None  # sign() で付与される HMAC
 | Agent identity | ✅ 主体 | エージェント証明書 / machine ID |
 | Role / privilege scope | ❌ 主体ではない（属性） | 鍵を持たない（署名される対象には含まれる） |
 
+### 役割の整理: 依頼者 / 実行者 / 調停者
+
+3主体は、委任の連鎖における役割が異なる:
+
+- **Human = 依頼者**: アクションを依頼する当事者。
+- **Agent = 実行者**: アクションを実際に起こす当事者。
+- **Service = 調停者・ブローカー**: Human の依頼を受け、Agent に実行させる、委任の連鎖の結節点。
+
 ### 個別署名 + 包括署名
 
 各主体が自分の identity を個別署名するだけだと、それらがバラバラに存在するだけで「このセットが一つのアクションのために結合された」保証がない（署名の切り貼り攻撃の余地）。そこで:
 
-1. **個別署名**: 各主体（human / service / agent）が自分の秘密鍵で自分の層を署名する。
-   - 内側の署名（alice の鍵）= 「私（alice）がこのアクションを依頼した」を証明。alice しか持たない鍵なので否認できない。
-2. **包括署名**: 「この3つの identity が一つのアクションのために結合された」ことを、外側の署名で保証する。
-   - 包括署名の主体は別主体を立ててもよいが、そうでないなら **Service または Agent** のどちらかが担う。
-   - 筆者の見立てでは **Agent** が自然（アクションを起こし receipt を生成する主体が agent instance だから）。
+1. **個別署名（当事者）**: 依頼者 Human と実行者 Agent が、それぞれ自分の秘密鍵で自分の層を署名する。
+   - Human の署名（alice の鍵）= 「私（alice）がこのアクションを依頼した」を証明。alice しか持たない鍵なので否認できない。
+   - Agent の署名（agent の鍵）= 「この agent instance が実行した」を証明。
+2. **包括署名（調停者）**: 「Human の依頼・Agent の実行・その時の権限スコープが、一つのアクションのために結合された」ことを、**Service** が自分の鍵で外側から署名して保証する。
+   - 包括署名の主体を **Service** とするのは、Service が委任の連鎖の結節点（調停者・ブローカー）だから。「依頼と実行が正しく結合している」ことを保証する立場として、結節点にいる Service が自然。
+   - 加えて、AARM の脅威モデルでは agent が動く orchestration 層は untrusted とされる。untrusted 側に近い Agent より、相対的に trusted 側に置かれる Service に全体保証を委ねるほうが、信頼の置き場所として妥当。
 
-これは現実の委任（delegation）構造を入れ子の署名（例: ネストした JWS、TLS 証明書チェーン）で表す考え方。
+### Service 自身の個別署名は不要（包括署名に統合）
+
+Service の層だけは、Human / Agent のように個別署名を別途行う必要はない。
+
+- 包括署名は **Service の鍵**で作られるため、包括署名が成立した時点で「Service がこのアクション全体に関与し、結合を保証した」ことは Service の鍵で証明済み。Service の関与の否認不可性は包括署名に内包される。
+- したがって Service の個別署名を別に持つのは冗長（署名2回は実装・性能面でも劣る）。「当事者（Human / Agent）は個別に自己署名し、調停者（Service）は全体を束ねる包括署名で関与を示す」という、役割に署名の形が対応した構造になる。
+- **実装上の注意**: Service の関与を担保するため、包括署名の対象に `service_identity` を必ず含めること。これにより、個別署名を省いても service identity が包括署名で保護される。
+
+結果として署名は3つ:「Human 個別署名」「Agent 個別署名」「Service 包括署名（自身の id と role/scope も対象に含む）」。これは現実の委任（delegation）構造を入れ子の署名（例: ネストした JWS、TLS 証明書チェーン）で表す考え方。
 
 ### IdentityContext 署名と Receipt 署名は別レイヤー
 
@@ -109,7 +126,7 @@ identity_token:   str | None  # sign() で付与される HMAC
 1. **命名・概念の修正**: `sign` が「主体が署名」を示唆するが実態は「システムによる attestation」であることを明確化。
 2. **鍵の分離**: receipt の tamper-evidence（システムの鍵）と identity の non-repudiation（各主体の鍵）を分ける。現状は両方とも `AARM_HMAC_SECRET`。
 3. **非対称署名化**: HMAC → Ed25519 等。
-4. **二段署名化**: 個別署名 + 包括署名。
+4. **二段署名化**: 当事者（Human / Agent）の個別署名 + 調停者（Service）の包括署名。
 5. **検証の充実**: freshness / revocation、identity 欠如時の deny/flag。
 
 ## 関連

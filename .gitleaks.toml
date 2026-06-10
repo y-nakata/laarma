@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "自動出力される監査ログサンプルの除外"
+paths = [
+    '''aarm_audit-sample\.jsonl$'''
+]

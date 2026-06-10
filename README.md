@@ -85,10 +85,10 @@ laarma/
 | R3 意図整合性評価 | MUST | ✅ | `PolicyEngine`（静的）+ `IntentAlignment`（動的 LLM）の二層評価 |
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
 | R5 改ざん耐性レシート | MUST | ✅ | `AARM_HMAC_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
-| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装 |
+| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装。設計検討は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
 | R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` に `recent_avg`・`drift_trend`・`scope_expansion_recent` を追加 |
 | R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
-| R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価 |
+| R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価。詳細は [docs/PRIVILEGE.md](docs/PRIVILEGE.md) |
 
 凡例: ✅ 準拠 / ⚠️ 部分準拠（MUST 差異あり）/ 🔶 部分実装 / ❌ 未実装
 
@@ -124,6 +124,14 @@ laarma/
 | [docs/SETUP.md](docs/SETUP.md) | セットアップ手順・環境変数リファレンス |
 | [docs/POLICY.md](docs/POLICY.md) | PAP（`policy.yaml`）の書き方 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 監査ログの永続化・改ざんチェック・HMAC 署名鍵の設定 |
+| [docs/PRIVILEGE.md](docs/PRIVILEGE.md) | 権限スコープ（privilege_scope）の扱いと R9 |
 | [docs/EMBEDDING.md](docs/EMBEDDING.md) | Embedding モデルの切り替えと比較 |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | ベンチマークの使い方 |
 | [docs/ADVANCED.md](docs/ADVANCED.md) | AARMRuntime 単独使用時の DEFER ハンドリング |
+| [docs/design/identity-signing.md](docs/design/identity-signing.md) | （設計メモ）アイデンティティ署名と R6 の扱い |
+
+## ライセンス
+
+本リポジトリのコードは [MIT ライセンス](LICENSE)。
+
+ただし、本リポジトリが参照・引用・翻訳する AARM 仕様および論文（Autonomous Action Runtime Management, Herman Errico, Cloud Security Alliance, 2026, [arXiv:2602.09433](https://arxiv.org/abs/2602.09433)）は [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) でライセンスされた第三者著作物であり、その引用・翻訳部分は CC BY 4.0 に従う。

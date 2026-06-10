@@ -1,7 +1,7 @@
 """
 demo.py — デモエントリーポイント
 
-AARM の価値を示す8つのシナリオを実行する。
+AARM の価値を示すシナリオを実行する。
 
 セットアップ:
   pip install -e laarma_sdk
@@ -118,6 +118,16 @@ if __name__ == "__main__":
     )
     if _hmac_secret:
         alice = alice.sign(_hmac_secret)
+
+    # bob は read 系のみ。write_file を持たない（シナリオ 10 の privilege_scope DENY 用）
+    bob = IdentityContext(
+        human_principal  = "bob@example.com",
+        service_identity = "agent-svc@iam",
+        session_id       = "sess_demo_bob",
+        privilege_scope  = ["read_file", "list_files"],
+    )
+    if _hmac_secret:
+        bob = bob.sign(_hmac_secret)
 
     # 本番環境（メンテナンス窓なし）— DEFER/STEP_UP トリガーに使用
     prod_env = EnvironmentContext(
@@ -239,6 +249,17 @@ if __name__ == "__main__":
         identity     = alice,
         environment  = prod_env,
         note         = "any_of 条件により、本番環境で .db 拡張子のファイルを削除しようとすると静的ルールで即 DENY。",
+        policy              = _policy,
+        transform_registry  = _transform_registry,
+    )
+
+    # シナリオ 10: privilege_scope — 権限スコープ外ツールの DENY
+    run_scenario(
+        title        = "シナリオ 10: privilege_scope — 権限スコープ外ツールの DENY",
+        user_request = "README.md を読んで内容を output.txt に書き出して",
+        identity     = bob,
+        environment  = staging_env,
+        note         = "bob は write_file の権限を持たない。denied_tools とは別の遮断経路（privilege_scope）で PolicyEngine が即 DENY。",
         policy              = _policy,
         transform_registry  = _transform_registry,
     )

@@ -10,6 +10,10 @@
 > arXiv 論文（2602.09433）は同じ著者によるその解説版で、要件をより詳しく説明している。
 > 本メモでは、規範的な典拠として CSA版の要件番号（R5/R6 等）を一次とし、
 > 詳しい説明が必要な箇所で論文の該当節を併記する。
+>
+> **出典・ライセンス**: 本メモが参照・引用・翻訳する AARM 仕様および論文
+> （Autonomous Action Runtime Management, Herman Errico, Cloud Security Alliance, 2026, arXiv:2602.09433）
+> は [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) でライセンスされている。引用・翻訳は同ライセンスに基づく。
 
 ## 1. AARM 仕様が明言していること
 

@@ -63,6 +63,7 @@ class BenchmarkCase:
     environment: dict[str, Any]
     expected_decision: str
     expected_modified_params: dict[str, Any] | None
+    identity: dict[str, Any] | None = None
 
 
 def load_cases(path: Path) -> list[BenchmarkCase]:
@@ -79,6 +80,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 environment=data["environment"],
                 expected_decision=data["expected_decision"],
                 expected_modified_params=data.get("expected_modified_params"),
+                identity=data.get("identity"),
             ))
     return cases
 
@@ -155,11 +157,17 @@ def run_case(
         return None, None, 0.0, "skip", None, None
 
     env = build_environment(case.environment)
+    # case に identity.privilege_scope があればそれを使い、なければ評価対象ツールのみ許可する
+    # （デフォルトはツールが必ずスコープ内になるため privilege_scope DENY は発火しない）
+    if case.identity and "privilege_scope" in case.identity:
+        privilege_scope = case.identity["privilege_scope"]
+    else:
+        privilege_scope = [case.action["tool_name"]]
     identity = IdentityContext(
         human_principal="benchmark@local",
         service_identity="benchmark-runner",
         session_id=case.id,
-        privilege_scope=[case.action["tool_name"]],
+        privilege_scope=privilege_scope,
     )
     policy, transform_registry = _build_policy(mode)
     runtime = AARMRuntime(

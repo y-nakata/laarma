@@ -40,8 +40,16 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -e ./laarma_sdk
       - run: pip install pip-audit
-      - run: pip-audit --desc
-
+      # CVE-2025-3000 を除外する理由:
+      #   - 実体は PyTorch issue #149623（自作 jit クラスのコンパイル時 Segmentation Fault）を
+      #     第三者DB(vuldb)が機械的に CVE 化したもの。PyTorch 本体はセキュリティ問題として扱っておらず
+      #     （module: crash ラベルのみ・修正版なし・Open のまま）、CVE も PyTorch 発番ではない。
+      #   - 攻撃経路は「自分で書いた torch.jit.script コードを自分でコンパイルしてクラッシュ」に限定され、
+      #     外部入力による攻撃ベクタではない（CVSS は各機関評価で Medium）。
+      #   - laarma は torch.jit.script を一切使用していない（torch は embedding 計算のみに利用）。
+      #   - 修正版が公表されておらず、torch をアップグレードしても警告は解消しない。
+      - run: pip-audit --desc --ignore-vuln CVE-2025-3000
+      
   # 自作 Python コードの危険なパターンを静的解析
   bandit:
     name: Static analysis (bandit)

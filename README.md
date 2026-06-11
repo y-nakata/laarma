@@ -82,7 +82,7 @@ laarma/
 |------|------|---------|------|
 | R1 事前インターセプト | MUST | ✅ | `AARMToolProxy` が全ツール呼び出しを仲介 |
 | R2 コンテキスト蓄積 | MUST | ✅ | `ContextAccumulator` が Cn = Cn-1 ∪ {an, on, δn} を維持 |
-| R3 意図整合性評価 | MUST | ✅ | `PolicyEngine`（静的）+ `IntentAlignment`（動的 LLM）の二層評価 |
+| R3 意図整合性評価 | MUST | ⚠️ | `PolicyEngine`（静的）+ `IntentAlignment`（動的 LLM）の二層評価。ただし PolicyEngine が静的ルールで MODIFY を返す経路は IntentAlignment を迂回する。設計検討は [docs/design/policy-engine-modify.md](docs/design/policy-engine-modify.md) |
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
 | R5 改ざん耐性レシート | MUST | ✅ | `AARM_HMAC_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
 | R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装。設計検討は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
@@ -129,6 +129,7 @@ laarma/
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | ベンチマークの使い方 |
 | [docs/ADVANCED.md](docs/ADVANCED.md) | AARMRuntime 単独使用時の DEFER ハンドリング |
 | [docs/design/identity-signing.md](docs/design/identity-signing.md) | （設計メモ）アイデンティティ署名と R6 の扱い |
+| [docs/design/policy-engine-modify.md](docs/design/policy-engine-modify.md) | （設計メモ）PolicyEngine の MODIFY と IntentAlignment（R3）の関係 |
 
 ## ライセンス
 

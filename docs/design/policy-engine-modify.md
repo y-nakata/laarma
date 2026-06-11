@@ -54,7 +54,7 @@ CSA版 R3 はこう定める（MUST）:
 - **context-dependent actions は蓄積されたセッションコンテキストに対して評価**しなければならない
 - defer は、policy engine が確信を持って allow/deny を決定できない場合にトリガーされる（MUST）
 
-**この4分類のどこにも MODIFY は登場しない。** そして「コンテキスト評価を省略して即座に決定してよい」と明示的に許可されているのは **forbidden（→即 DENY）のみ**。
+**この4分類のどこにも MODIFY は登場しない。** そして「コンテキスト評価を省略して即座に決定してよい」と明示的に許可されているのは **forbidden（→DENY）のみ**。
 
 ### Table I: Action Classification Framework（論文 §IV-B-5）
 
@@ -90,11 +90,15 @@ CSA版 R4（MUST）:
 
 「変換されたパラメータで進む」は **MODIFY の定義に組み込まれており、STEP_UP の定義には登場しない**。
 
+STEP_UP の MUST 要件は操作的な記述に留まる: 承認が得られるまで実行をブロックすること、承認リクエストを設定済みの承認者にルーティングすること、設定可能なタイムアウトを設けること（タイムアウト時は DENY が推奨）、承認者には完全なアクションコンテキストを利用可能にすること。**「承認された場合、最終的な `decision` が何になるか」は、仕様のどこにも明記されていない。**
+
 ### §IV-C2 式(3): 形式モデル
 
 論文 §IV-C2 は policy π を `π:(a,C)→{ALLOW,DENY,MODIFY,STEP_UP,DEFER}` という**単一値を返す関数**として定義する。各 π の構成要素には、match predicate・decision d・priority に加えて、「**d = MODIFY のときに適用される**」任意の modification function `f(a)→a'` が含まれる。
 
 → **MODIFY と STEP_UP は、同じ (a,C) に対する互いに排他的な決定値**として定義されている。「変換後のパラメータを STEP_UP として人間に提示する」という組み合わせは、この形式モデルには現れない。
+
+この式(3)は、**ある1つの a を1回評価して5値のうち1つを返す、1段階のモデル**である点にも注意が必要。ALLOW の「unchanged」も MODIFY の「transformed」も、同じ a を基準にした話であり、評価が複数段階に分かれて a 自体が書き換わっていく、という状況は想定されていない。
 
 ## 3. laarma の現状
 
@@ -160,6 +164,40 @@ R3 の整理（forbidden だけがコンテキスト評価省略を許される�
 
 `models.py` の `AuthorizationResult.modified_params` は `decision` と独立したフィールドであり、この扱いを構造的に許容している。
 
+### STEP_UP（modified_params あり）が承認された場合の最終結果: ALLOW か MODIFY か
+
+上記がさらに先送りしていた論点がある。**人間が承認した後、最終的な receipt の `decision` は ALLOW なのか MODIFY なのか。**
+
+#### 仕様は1段階モデル、laarma の設計案は2段階モデル
+
+§2 で見たとおり、R4・式(3)は「ある1つの a を1回評価して5値のうち1つを返す」**1段階モデル**である。この世界では a は1つしかなく、ALLOW の「unchanged」と MODIFY の「transformed」は、同じ a を基準にした話で、両者の間に曖昧さは生じない。
+
+ところが本メモの設計案は **2段階**になっている。
+
+1. PolicyEngine が元のアクション a を a'（変換後）に書き換える
+2. IntentAlignment が a' を評価し、STEP_UP を返す
+3. 人間が承認 → a' が実行される
+
+ここで「unchanged」「transformed」は、**どちらの a を基準にするかで答えが変わる**。承認者に見せた a'（＝実行されるもの）を基準にすれば「a' がそのまま実行された」→ ALLOW。エージェントが最初に提案した a を基準にすれば「a が a' に変換されて実行された」→ MODIFY。
+
+**仕様の1段階モデルは、この基準点が分岐するケースを想定していない。** ALLOW でも MODIFY でも、どちらを選んでも仕様が明示的に答えを与えているわけではない。**この組み合わせ（複数段階の評価を経て a が書き換わった上での STEP_UP 承認）自体が、仕様が明示的に扱っていない領域である。**
+
+#### STEP_UP の解決先（ALLOW/DENY のみか）について
+
+仕様の STEP_UP 要件（§2）は承認/却下の二値ゲートとしての操作を記述するのみで、「承認された場合に `decision` が何になるか」を明記していない。「STEP_UP は ALLOW/DENY のみに解決される」という想定も、「MODIFY にも解決されうる」という想定も、**どちらも仕様の文言からは導けない**。仕様が MODIFY を STEP_UP の解決先として明示的に排除しているわけではないが、明示的に含めているわけでもない。
+
+#### laarma の選択（未確定）
+
+仕様が空白である以上、**R4 自身の定義（unchanged / transformed）に最も整合する基準点を選ぶ**のが一案である。
+
+R4 の定義における a は、π:(a,C)→{...} の a、すなわち**最初に評価対象になったアクション**と読むのが自然。2段階設計でこれに対応するのは、**エージェントが最初に提案した（変換前の）アクション**である。これを基準にすれば、a' が実行された時点で a と異なる → **最終決定は MODIFY**。
+
+人間が承認した、という事実は `decision` とは別に、`AuthorizationResult.resolution_method`（例: `"human_approved"`）で記録できる。役割分担としては、`decision` =「最終的に何が実行されたか（最初の a と比べて変わったか）」、`resolution_method` =「どう解決されたか（人間の承認を経たか）」、という整理になる。
+
+逆に「ALLOW + modified_params（元と異なる）」を選ぶと、R4 の ALLOW の定義（unchanged）と `modified_params` が non-null であるという事実が、字面上で矛盾する。
+
+**したがって本メモでの暫定的な方向性は、「最終決定は MODIFY、`resolution_method=human_approved` を併記」**とする。ただしこれも仕様が指定したものではなく、**R4 の定義との整合性から導いた laarma の設計選択（仕様外拡張）**であることに変わりはない。
+
 ### Step 0（PolicyEngine の terminal 出力）として残るのは DENY と DEFER のみ
 
 §5 の非対称性に基づき、PolicyEngine が IntentAlignment を経ずに terminal な結果を返してよいのは **DENY と DEFER のみ**とする。MODIFY（および将来 ALLOW を静的に返すルールが追加される場合も同様）は、必ず IntentAlignment（または `_skip_intent_alignment_for_testing` 時のスタブ）を経由する。
@@ -169,10 +207,10 @@ R3 の整理（forbidden だけがコンテキスト評価省略を許される�
 この変更は #43・#56 規模の一行修正ではなく、`runtime.py` の制御フロー変更を伴う。
 
 1. **`policy_engine.py`**: MODIFY ルール発火時の戻り値の形を変える。terminal な `AuthorizationResult` ではなく、「変換後パラメータ + `policy_rule_id`」を表す中間データ（例: `(None, modified_params, policy_rule_id)`）を返すようにする。DENY/DEFER は従来どおり terminal。
-2. **`runtime.py`**: `intercept()` で、PolicyEngine が「変換後パラメータ」を返した場合、それを適用したアクションで IntentAlignment を呼ぶ。最終結果に `modified_params` と `policy_rule_id` を引き継ぐ（IntentAlignment の reason とは別に、ポリシーが事前変換した事実を残す）。
+2. **`runtime.py`**: `intercept()` で、PolicyEngine が「変換後パラメータ」を返した場合、それを適用したアクションで IntentAlignment を呼ぶ。最終結果に `modified_params` と `policy_rule_id` を引き継ぐ（IntentAlignment の reason とは別に、ポリシーが事前変換した事実を残す）。IntentAlignment が STEP_UP を返した場合、承認後の最終 `decision`（§6「STEP_UP（modified_params あり）が承認された場合の最終結果」）の扱いを実装する。
 3. **`intent_alignment.py`**: 変換後のアクション（元のアクションではない）を評価する呼び出しになることを確認・調整する。
 4. **`benchmark.py`**: `--mode policy-engine`（`_skip_intent_alignment_for_testing=True`）のとき、MODIFY ルールが発火した場合の挙動を定義する。現在 `_POLICY_ENGINE_DECISIONS = {DENY, DEFER, MODIFY}` は MODIFY を「PolicyEngine だけで判定可能」として扱っているが、新設計では MODIFY は IntentAlignment（またはそのスキップスタブ）の結果に依存する。スキップ時は「変換後パラメータで ALLOW」相当として `decision=MODIFY, decision_source=policy_engine` を返す、といった定義が必要。
-5. **回帰ケース追加**: §4 のような「意図外 write、パスは危険」のケースを benchmark に追加し、変換後も DENY/DEFER になることを確認する（pipeline モード、LLM 必要）。シナリオ7相当（意図に沿った write）の結果が変わらないことも確認する。
+5. **回帰ケース追加**: §4 のような「意図外 write、パスは危険」のケースを benchmark に追加し、変換後も DENY/DEFER になることを確認する（pipeline モード、LLM 必要）。シナリオ7相当（意図に沿った write）の結果が変わらないことも確認する。STEP_UP 承認後に `decision=MODIFY, resolution_method=human_approved` となるケースの確認も追加する。
 
 ## 8. 未検討の関連論点
 

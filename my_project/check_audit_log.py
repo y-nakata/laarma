@@ -29,6 +29,7 @@ def _compute_hash(entry: dict, secret: str | None) -> str:
             "decision_source":     entry.get("decision_source", "intent_alignment"),
             "policy_rule_id":      entry.get("policy_rule_id"),
             "deferral_reason":     entry.get("deferral_reason"),
+            "proposed_decision":   entry.get("proposed_decision"),
             "resolution_method":   entry.get("resolution_method"),
             "resolution_timestamp": entry.get("resolution_timestamp"),
         },

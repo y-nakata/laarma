@@ -27,21 +27,29 @@ class AARMRuntime:
         metadata: dict[str, Any] | None = None,
         _skip_intent_alignment_for_testing: bool = False,
         transform_registry: "dict[str, Any] | None" = None,
+        _intent_alignment: "Any | None" = None,
     ) -> None:
-        self._identity              = identity
-        self._environment           = environment
-        _policy                     = policy or DEFAULT_POLICY
-        self._accumulator           = ContextAccumulator(user_intent=user_intent, metadata=metadata, policy=_policy)
-        self._policy_engine         = PolicyEngine(policy=_policy, transform_registry=transform_registry)
-        self._intent_alignment      = IntentAlignment(
-            model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),
-        )
-        if _skip_intent_alignment_for_testing and not os.getenv("AARM_ALLOW_SKIP_INTENT_ALIGNMENT"):
-            raise RuntimeError(
-                "skip_intent_alignment_for_testing は本番環境では使用禁止です。"
-                "テスト目的で使用する場合は AARM_ALLOW_SKIP_INTENT_ALIGNMENT=1 を設定してください。"
+        self._identity    = identity
+        self._environment = environment
+        _policy           = policy or DEFAULT_POLICY
+        self._accumulator = ContextAccumulator(user_intent=user_intent, metadata=metadata, policy=_policy)
+        # IntentAlignment を構築して PolicyEngine に注入する（提案/上書きモデル）
+        if _skip_intent_alignment_for_testing:
+            if not os.getenv("AARM_ALLOW_SKIP_INTENT_ALIGNMENT"):
+                raise RuntimeError(
+                    "skip_intent_alignment_for_testing は本番環境では使用禁止です。"
+                    "テスト目的で使用する場合は AARM_ALLOW_SKIP_INTENT_ALIGNMENT=1 を設定してください。"
+                )
+            ia = _intent_alignment  # スタブが注入されている場合はそれを使用
+        else:
+            ia = _intent_alignment or IntentAlignment(
+                model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),
             )
-        self._skip_intent_alignment = _skip_intent_alignment_for_testing
+        self._policy_engine = PolicyEngine(
+            policy=_policy,
+            transform_registry=transform_registry,
+            intent_alignment=ia,
+        )
         self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
         # R6 MUST: identity の cryptographic binding 検証
         _hmac_secret = os.getenv("AARM_HMAC_SECRET")
@@ -81,16 +89,12 @@ class AARMRuntime:
             identity=self._identity,
         )
         self._accumulator.record_action(action)
-        result = self._policy_engine.evaluate(action, self._accumulator.context, self._environment)
-        if result is None:
-            if self._skip_intent_alignment:
-                result = AuthorizationResult(decision=Decision.ALLOW, reason="ポリシー通過。", action=action)
-            else:
-                result = self._intent_alignment.evaluate(
-                    action,
-                    self._accumulator.summary(),
-                    self._environment,
-                )
+        result = self._policy_engine.evaluate(
+            action,
+            self._accumulator.context,
+            self._accumulator.summary(),
+            self._environment,
+        )
         self._accumulator.record_result(result)
         # DEFER を含む全判断をここで一元ログする。
         # tool_proxy.py 側で DEFER を別途 print しないこと（二重ログになる）。

@@ -118,8 +118,10 @@ class AuthorizationResult:
     decision_source:       str             = "intent_alignment"  # "policy_engine" | "denied_tools" | "privilege_scope" | "intent_alignment"
     # DEFER ワークフロー用フィールド
     deferral_reason:       str | None      = None
-    resolution_method:     str | None      = None  # "autonomous" | "step_up" | None
+    resolution_method:     str | None      = None  # "autonomous" | "step_up" | "human_approved" | None
     resolution_timestamp:  datetime | None = None
+    # 提案/上書きモデル用フィールド — PolicyEngine の提案が IntentAlignment に上書きされた際に記録
+    proposed_decision:     str | None      = None  # PolicyEngine が提案した decision 値
     receipt_hash:          str             = field(init=False)
 
     def __post_init__(self) -> None:
@@ -136,6 +138,7 @@ class AuthorizationResult:
                 "decision_source":    self.decision_source,
                 "policy_rule_id":     self.policy_rule_id,
                 "deferral_reason":    self.deferral_reason,
+                "proposed_decision":  self.proposed_decision,
                 "resolution_method":  self.resolution_method,
                 "resolution_timestamp": (
                     self.resolution_timestamp.isoformat()
@@ -166,6 +169,8 @@ class AuthorizationResult:
         }
         if self.policy_rule_id:
             d["policy_rule_id"] = self.policy_rule_id
+        if self.proposed_decision:
+            d["proposed_decision"] = self.proposed_decision
         if self.deferral_reason:
             d["deferral_reason"]      = self.deferral_reason
         if self.resolution_method:

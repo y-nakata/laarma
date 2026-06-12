@@ -1,22 +1,16 @@
 """
-AARM Policy Engine — R3 (静的ルール層)
-None を返した場合は Intent Alignment へ。None == ALLOW ではない。
+AARM Policy Engine — R3 式(3) の π を完全実装（提案/上書きモデル）
 
-Policy Engine は「何があっても絶対にアウト」なものだけを弾く
-最小の静的ゲートとして振る舞います。
+PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す。
+IntentAlignment はその内部協力者（外部から注入される）。
 
-責務:
-  - DENY: 絶対禁止ツールのブロック
-  - DEFER: 必須パラメータ不足の一時保留
-  - DENY: アクション数上限の制御
-  - YAML 差し込みルールの評価 (DENY / DEFER / MODIFY)
+設計方針: docs/design/policy-engine-modify.md §6 参照。
 
-【設計注記: PolicyEngine の MODIFY について】
-AARM 仕様では MODIFY は (a, C, E) タプルを評価する動的判断である。
-PolicyEngine が MODIFY を返す場合（例: 危険な書き込みパスの basename 変換）は
-AARM 仕様外の実用的妥協である。
-ドメイン固有の決定論的変換ルールは IntentAlignment に混入させず
-PolicyEngine で完結させることで層の責務を明確化している。
+  - decision == DENY  → terminal（IntentAlignment 不要。常に安全側）
+  - それ以外（ALLOW / MODIFY / DEFER / STEP_UP、またはルールなし → 暗黙 ALLOW）
+      → 「提案」として IntentAlignment に確認する
+      → IA が ALLOW → 提案確定
+      → IA が ALLOW 以外 → IA の判断で上書き（proposed_decision に元の提案を記録）
 """
 
 from __future__ import annotations
@@ -28,6 +22,9 @@ from typing import Callable
 
 from .environment import EnvironmentContext
 from .models import Action, AuthorizationResult, Decision, SessionContext
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .intent_alignment import IntentAlignment
 
 
 def _match_conditions(
@@ -110,9 +107,11 @@ class PolicyEngine:
         self,
         policy: Policy | None = None,
         transform_registry: dict[str, Callable[[str], str]] | None = None,
+        intent_alignment: "IntentAlignment | None" = None,
     ) -> None:
         self._policy   = policy or DEFAULT_POLICY
         self._registry = transform_registry or {}
+        self._ia       = intent_alignment
         # フェイルファスト: rules が参照する変換名がレジストリに存在するか検証
         for rule in self._policy.rules:
             if rule.modify_transform:
@@ -127,11 +126,18 @@ class PolicyEngine:
         self,
         action: Action,
         context: SessionContext,
+        context_summary: dict,
         environment: EnvironmentContext | None = None,
-    ) -> AuthorizationResult | None:
+    ) -> AuthorizationResult:
+        """
+        式(3)の π として (a, C, E) を評価し、常に terminal な AuthorizationResult を返す。
+
+        DENY は即 terminal。それ以外は「提案」として IntentAlignment に確認する。
+        IntentAlignment が ALLOW → 提案確定。ALLOW 以外 → 上書き。
+        """
         p = self._policy
 
-        # 0. privilege_scope チェック（空リストは無制限 — 後方互換）
+        # 0. privilege_scope チェック — DENY は常に terminal（安全側）
         if action.identity and action.identity.privilege_scope:
             if action.tool_name not in action.identity.privilege_scope:
                 return AuthorizationResult(
@@ -141,7 +147,7 @@ class PolicyEngine:
                     decision_source="privilege_scope",
                 )
 
-        # 1. 絶対禁止ツールの判定（Policy Engine 本来の責務）
+        # 1. 絶対禁止ツールの判定 — DENY は常に terminal
         if action.tool_name in p.denied_tools:
             return AuthorizationResult(
                 decision=Decision.DENY,
@@ -152,10 +158,10 @@ class PolicyEngine:
 
         # 2. 設定ファイルから差し込まれたルールを評価
         rule_result = self._evaluate_rules(action, environment)
-        if rule_result is not None:
-            return rule_result
+        if rule_result is not None and rule_result.decision == Decision.DENY:
+            return rule_result  # DENY は terminal
 
-        # 3. 必須パラメータのチェック（Policy Engine 本来の責務）
+        # 3. 必須パラメータのチェック — 構文エラーは意図整合性問題でないため terminal
         missing = [k for k in p.required_params.get(action.tool_name, []) if k not in action.parameters]
         if missing:
             return AuthorizationResult(
@@ -165,7 +171,7 @@ class PolicyEngine:
                 decision_source="policy_engine",
             )
 
-        # 4. 最大アクション数の制限（Policy Engine 本来の責務）
+        # 4. 最大アクション数の制限 — DENY は terminal
         action_count = sum(1 for e in context.action_history if e.get("type") != "tool_output")
         if action_count >= p.max_actions:
             return AuthorizationResult(
@@ -175,7 +181,54 @@ class PolicyEngine:
                 decision_source="policy_engine",
             )
 
-        return None  # 動的評価層（Intent Alignment）へ委譲
+        # 5. 提案/上書きモデル: rule_result（DENY 以外）または暗黙 ALLOW を「提案」として IA に確認
+        proposal = rule_result or AuthorizationResult(
+            decision=Decision.ALLOW,
+            reason="ポリシー通過。",
+            action=action,
+            decision_source="policy_engine",
+        )
+        return self._confirm_with_ia(proposal, action, context_summary, environment)
+
+    def _confirm_with_ia(
+        self,
+        proposal: AuthorizationResult,
+        original_action: Action,
+        context_summary: dict,
+        environment: EnvironmentContext | None,
+    ) -> AuthorizationResult:
+        """
+        提案を IntentAlignment に確認する。
+        IA が ALLOW → 提案確定。ALLOW 以外 → IA の判断で上書き（proposed_decision を記録）。
+        IA が注入されていない（スタブなし）場合は提案をそのまま確定。
+        """
+        if self._ia is None:
+            return proposal
+
+        # MODIFY の場合は変換後のアクション a' を IA に渡す
+        if proposal.decision == Decision.MODIFY and proposal.modified_params:
+            eval_action = Action(
+                tool_name=original_action.tool_name,
+                parameters=proposal.modified_params,
+                identity=original_action.identity,
+                action_id=original_action.action_id,
+                timestamp=original_action.timestamp,
+            )
+        else:
+            eval_action = original_action
+
+        ia_result = self._ia.evaluate(eval_action, context_summary, environment)
+
+        if ia_result.decision == Decision.ALLOW:
+            return proposal  # 提案確定
+
+        # IA が上書き — policy_rule_id（発火ルール）を保持しつつ、proposed_decision を記録
+        from dataclasses import replace
+        return replace(
+            ia_result,
+            policy_rule_id=proposal.policy_rule_id,
+            proposed_decision=proposal.decision.value,
+        )
 
     def _evaluate_rules(
         self,

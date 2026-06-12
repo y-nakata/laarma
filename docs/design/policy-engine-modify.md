@@ -2,9 +2,9 @@
 
 [← README に戻る](../../README.md)
 
-> **この文書の位置づけ**: これは**設計検討のメモ**であり、確定した仕様でも実装指示でもない。
-> AARM 仕様が明言していること、laarma の現状、そして未確定の設計案を区別して記録する。
-> 実装に進む前に、ここの設計案を人間が確定させる必要がある。
+> **この文書の位置づけ**: これは laarma の**確定した設計方針**を記録する設計メモである。
+> AARM 仕様が明言していること、laarma の現状、そして仕様の空白部分に対する laarma の設計判断を、
+> それぞれ区別して記録する。本メモの方針は合意済みであり、実装はこの方針に従う。
 >
 > **仕様の典拠について**: AARM の公式仕様は CSA（Cloud Security Alliance）版の System Category Specification v1.0。
 > arXiv 論文（2602.09433）は同じ著者によるその解説版で、要件をより詳しく説明している。
@@ -189,11 +189,12 @@ PolicyEngine が Step 0 で **DENY** を確定させるのは、常に安全側�
 
 一方、**DENY 以外の4値（ALLOW・MODIFY・DEFER・STEP_UP）はすべて、何らかの形で「実行に至る経路」を持つ**。ALLOW は直接実行。MODIFY は変換後に実行。DEFER は DeferralResolver の解決を経て ALLOW/STEP_UP（→人間承認で実行）になりうる。STEP_UP は人間承認で実行になりうる。これらを Step 0 で確定させると、**IntentAlignment なら DENY としたはずのアクションが、これらの経路のいずれかを通って実行に至りうる**。
 
-**R3・Table I との対応**: forbidden（→即DENY、コンテキスト評価不要）のみがコンテキスト評価省略を許される。Context-Dependent Deny（Policy Baseline=ALLOW、misalignment detected→DENY）は、**静的な ALLOW 相当の判断を、コンテキスト評価が DENY に上書きする**形を示している。この「静的判断 → コンテキスト評価による上書きの可能性」という構造を、DENY 以外の全決定に一般化したものが、次節の設計案。
+**R3・Table I との対応**: forbidden（→即DENY、コンテキスト評価不要）のみがコンテキスト評価省略を許される。Context-Dependent Deny（Policy Baseline=ALLOW、misalignment detected→DENY）は、**静的な ALLOW 相当の判断を、コンテキスト評価が DENY に上書きする**形を示している。この「静的判断 → コンテキスト評価による上書きの可能性」という構造を、DENY 以外の全決定に一般化したものが、次節の設計である。
 
-## 6. 設計案（未確定 — yukinorinkt の設計判断）: 提案/上書きモデル
+## 6. 設計: 提案/上書きモデル
 
-> 以下は仕様が指定したものではなく、R3・式(3)・Table I（Context-Dependent Deny の上書き構造）から導いた**設計案の一つ**。
+> 本節は laarma の確定した設計方針である。R3・式(3)・Table I（Context-Dependent Deny の上書き構造）から導いた。
+> 仕様が明示的に規定していない部分については、その旨を都度明記する。
 
 ### 概要
 
@@ -242,21 +243,21 @@ IntentAlignment の結果が **ALLOW 以外（DENY/DEFER/STEP_UP）** → Intent
 
 ### STEP_UP（modified_params あり）が承認された場合の最終結果: ALLOW か MODIFY か
 
-**仕様は1段階モデル、本設計案は2段階モデル**。§2 の式(3)は「ある1つの a を1回評価して5値のうち1つを返す」1段階モデルで、ALLOW の「unchanged」と MODIFY の「transformed」は同じ a を基準にした話。
+**仕様は1段階モデル、本設計は2段階モデル**。§2 の式(3)は「ある1つの a を1回評価して5値のうち1つを返す」1段階モデルで、ALLOW の「unchanged」と MODIFY の「transformed」は同じ a を基準にした話。
 
-本設計案は2段階になる: (1) PolicyEngine が元のアクション a を a'（変換後）に書き換える、(2) IntentAlignment が a' を評価し STEP_UP を返す、(3) 人間が承認 → a' が実行される。ここで「unchanged」「transformed」は、承認者に見せた a'（＝実行されるもの）を基準にすれば ALLOW、エージェントが最初に提案した a を基準にすれば MODIFY、と**基準点によって答えが分岐する**。仕様の1段階モデルはこの分岐を想定していない。
+本設計は2段階になる: (1) PolicyEngine が元のアクション a を a'（変換後）に書き換える、(2) IntentAlignment が a' を評価し STEP_UP を返す、(3) 人間が承認 → a' が実行される。ここで「unchanged」「transformed」は、承認者に見せた a'（＝実行されるもの）を基準にすれば ALLOW、エージェントが最初に提案した a を基準にすれば MODIFY、と**基準点によって答えが分岐する**。仕様の1段階モデルはこの分岐を想定していない。これは**仕様が明示的に扱っていない領域**である。
 
-**laarma の選択（未確定）**: R4 の定義における a は π:(a,C)→{...} の a、すなわち**最初に評価対象になったアクション**と読むのが自然。これを基準にすれば、a' が実行された時点で a と異なる → **最終決定は MODIFY**。人間が承認した事実は `decision` とは別に `resolution_method`（例: `"human_approved"`）で記録する。
+**laarma の決定**: R4 の定義における a は π:(a,C)→{...} の a、すなわち**最初に評価対象になったアクション**と読むのが自然。これを基準にすれば、a' が実行された時点で a と異なる → **最終決定は MODIFY**。人間が承認した事実は `decision` とは別に `resolution_method`（例: `"human_approved"`）で記録する。
 
 逆に「ALLOW + modified_params（元と異なる）」を選ぶと、R4 の ALLOW の定義（unchanged）と `modified_params` が non-null であるという事実が、字面上で矛盾する。
 
-**したがって本メモでの暫定的な方向性は、「最終決定は MODIFY、`resolution_method=human_approved` を併記」**とする。ただしこれも仕様が指定したものではなく、**R4 の定義との整合性から導いた laarma の設計選択（仕様外拡張）**であることに変わりはない。
+**したがって laarma は「最終決定は MODIFY、`resolution_method=human_approved` を併記」とする。** これは R4 の定義（unchanged/transformed の基準点を「最初の a」とする）との整合性から導いた、仕様の空白部分に対する laarma の設計判断である（仕様の決定モデルそのものは拡張しない。`decision` は標準の5値のうちの MODIFY のまま）。
 
 ### レシートへの記録（フォレンジック、R5）
 
 静的ルールの「提案」が IntentAlignment によって**上書き**された場合、レシートには両方の情報を残す: 提案した `policy_rule_id` と提案された `decision`（例: `production_delete_defer` が DEFER を提案）、および最終的な `decision`（例: IntentAlignment による DENY）とその `reason`。これにより「どの静的ルールが発火し、それが意図整合性チェックでどう判断されたか」が事後に追跡できる（R5 のフォレンジック要件）。
 
-## 7. 影響範囲とスモールステップ案
+## 7. 影響範囲とスモールステップ
 
 この変更は #43・#56 規模の一行修正ではなく、`runtime.py`/`policy_engine.py` の制御フロー変更を伴う。
 

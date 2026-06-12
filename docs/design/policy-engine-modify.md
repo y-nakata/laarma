@@ -1,4 +1,4 @@
-# 設計メモ: PolicyEngine の MODIFY と IntentAlignment（R3）の関係
+# 設計メモ: PolicyEngine を R3・式(3) の π として完成させる（提案/上書きモデル）
 
 [← README に戻る](../../README.md)
 
@@ -11,11 +11,23 @@
 > 本メモでは、規範的な典拠として CSA版の要件番号（R3/R4 等）を一次とし、
 > 詳しい説明が必要な箇所で論文の該当節を併記する。
 >
+> **方法論上の注記（重要）**: 論文 Figure 1（AARM Logical Component Model）は、本メモの根拠として**使用しない**。
+> Figure 1 は Context Accumulator と Policy Engine を並列の箱として描いており、
+> この図を文字通り読むと「Policy Engine への入力に C（蓄積コンテキスト）が含まれない」ことになり、
+> R3・式(3) が要求する「policy engine **with intent alignment**」（評価は (a,C) の両方に対して行う）が
+> 構造的に成立しない。つまり Figure 1 は R3・式(3) の MUST テキストと矛盾する。
+> 論文自身も「コンポーネント（関心事の語彙）を規定するのであって実装の詳細を規定するのではない」と述べており、
+> Figure 1 はコンポーネント間のデータフローを精査した設計図ではなく、概念の配置図に近い。
+> MUST テキスト（R3/R4/式3）と図が矛盾する場合、図を優先してはならない。
+> なお Table I（Action Classification Framework）は、R3 の本文で述べられる4分類を表形式に
+> 整理したものであり、図1のような独立した構造的主張ではない（R3 本文の言い換え）ため、
+> 本メモでは R3 本文の補助として引用する。
+>
 > **出典・ライセンス**: 本メモが参照・引用・翻訳する AARM 仕様および論文
 > （Autonomous Action Runtime Management, Herman Errico, Cloud Security Alliance, 2026, arXiv:2602.09433）
 > は [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) でライセンスされている。引用・翻訳は同ライセンスに基づく。
 
-## 1. 発端: PolicyEngine の MODIFY が IntentAlignment を完全に迂回する
+## 1. 発端: PolicyEngine の静的ルールが IntentAlignment を完全に迂回する
 
 `laarma_sdk/src/laarma/runtime.py` の `intercept()` はこうなっている:
 
@@ -25,7 +37,7 @@ if result is None:
     result = self._intent_alignment.evaluate(...)
 ```
 
-**PolicyEngine が `None` 以外（DENY / DEFER / MODIFY）を返すと、IntentAlignment は一切呼ばれない。**
+**PolicyEngine が `None` 以外（DENY / DEFER / MODIFY / STEP_UP）を返すと、IntentAlignment は一切呼ばれない。**
 
 `policy_engine.py` の冒頭には、すでに次の自己言及コメントがある:
 
@@ -35,6 +47,8 @@ if result is None:
 > IntentAlignment に混入させず PolicyEngine で完結させることで層の責務を明確化している。
 
 このコメントは「**層の責務分担**」（変換ロジックをどちらの層に置くか）の問題として説明しているが、本メモで扱うのはそれとは別の、**安全性の問題**である。
+
+当初は MODIFY（`unsafe_write_path`）に絞って検討を始めたが、検討の過程で **DEFER（`production_delete_defer`）にも同型の問題があること**が分かった（§4）。そこで本メモは MODIFY 単体の修正ではなく、**PolicyEngine の静的ルールと IntentAlignment の関係を、R3・式(3) に基づいて再設計する**という、より広いスコープに改める。
 
 ## 2. AARM 仕様が明言していること
 
@@ -56,9 +70,7 @@ CSA版 R3 はこう定める（MUST）:
 
 **この4分類のどこにも MODIFY は登場しない。** そして「コンテキスト評価を省略して即座に決定してよい」と明示的に許可されているのは **forbidden（→DENY）のみ**。
 
-### Table I: Action Classification Framework（論文 §IV-B-5）
-
-論文の分類表を見ると、さらに踏み込んだことが分かる:
+### Table I: Action Classification Framework（論文 §IV-B-5、R3本文の言い換え）
 
 | Category | Policy Baseline | Context Evaluation | Runtime Decision |
 |---|---|---|---|
@@ -69,7 +81,9 @@ CSA版 R3 はこう定める（MUST）:
 | Standard Allow | ALLOW | No signals | ALLOW |
 | Standard Deny | DENY | No alignment | DENY |
 
-**Context Evaluation が「Ignored」とされているのは Forbidden の1行だけ**。他の全カテゴリは、たとえ最終的な決定が変わらなくても（例: Standard Deny の「No alignment」）、何らかのコンテキスト評価を経ることが前提になっている。そして **MODIFY はこの表のどこにも登場しない**。
+**Context Evaluation が「Ignored」とされているのは Forbidden の1行だけ**。他の全カテゴリは、たとえ最終的な決定が変わらなくても、何らかのコンテキスト評価を経ることが前提になっている。そして **MODIFY はこの表のどこにも登場しない**。
+
+特に注目すべきは2行目: **Context-Dependent Deny は「Policy Baseline = ALLOW」だが、コンテキスト評価で misalignment が検出されると DENY になる**。すなわち、**静的ポリシーが下した非DENYの判断を、コンテキスト評価（意図整合性）が DENY に上書きする**、という構造が、R3本文・Table Iの双方に明記されている。これが後述する「提案/上書きモデル」の直接の根拠になる。
 
 ### R4: Five Authorization Decisions（CSA版 R4 / 論文 §VII-B-4）
 
@@ -100,9 +114,11 @@ STEP_UP の MUST 要件は操作的な記述に留まる: 承認が得られる�
 
 この式(3)は、**ある1つの a を1回評価して5値のうち1つを返す、1段階のモデル**である点にも注意が必要。ALLOW の「unchanged」も MODIFY の「transformed」も、同じ a を基準にした話であり、評価が複数段階に分かれて a 自体が書き換わっていく、という状況は想定されていない。
 
+**式(3)の最も重要な点**: π は `(a, C)` の両方を入力に取る、**単一の関数**である。laarma の現状（PolicyEngine が `(a,C,E)` の一部だけ見て None を返し、別関数 IntentAlignment が `(a,C,E)` 全体を見る、という2関数構成）は、**π を2つに分割した実装**になっている。この分割自体が、§1 の問題を生んでいる。
+
 ## 3. laarma の現状
 
-`my_project/policies/policy.yaml` の MODIFY ルールは現在1つだけ: `unsafe_write_path`。
+### MODIFY: `unsafe_write_path`
 
 ```yaml
 - id: unsafe_write_path
@@ -113,50 +129,110 @@ STEP_UP の MUST 要件は操作的な記述に留まる: 承認が得られる�
   modify_transform: basename  # path を basename(path) に変換
 ```
 
-`_evaluate_rules` がこの条件にマッチすると、**`AuthorizationResult(decision=MODIFY, ...)` を terminal な結果として返す**。`runtime.intercept` はこれを `None` ではないと判定し、IntentAlignment を呼ばない。
+`_evaluate_rules` がこの条件にマッチすると、`AuthorizationResult(decision=MODIFY, ...)` を terminal な結果として返す。`runtime.intercept` はこれを `None` ではないと判定し、IntentAlignment を呼ばない。
+
+### DEFER: `production_delete_defer`
+
+```yaml
+- id: production_delete_defer
+  conditions:
+    tool: delete_file
+    environment_type: production
+    not_in_maintenance_window: true
+    none_of:
+      - path: "\\.(conf|config|log|db|sqlite)$"
+      - path: "database"
+  decision: DEFER
+  reason: "本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要です（一時保留）"
+```
+
+この条件は**意図整合性とは無関係**（環境・タイミングのみ）。発火すると `AuthorizationResult(decision=DEFER, ...)` が terminal に返り、IntentAlignment は呼ばれない。
 
 ## 4. 具体的な懸念シナリオ
 
-ユーザーの依頼は「README.md を読んで内容を教えて」（意図 = 読み取りのみ）。エージェント（暴走 or 仕込み）が `write_file(path="/etc/cron.d/evil", content="...")` を呼ぶ。
+両方とも、ユーザーの依頼は「README.md を読んで内容を教えて」（意図 = 読み取りのみ）。エージェント（暴走 or 仕込み）が意図外のツールを呼ぶ。
+
+### MODIFY のケース
+
+エージェントが `write_file(path="/etc/cron.d/evil", content="...")` を呼ぶ。
 
 1. `unsafe_write_path` が発火（`path` が `^/` にマッチ）
 2. `path` → `basename("/etc/cron.d/evil")` = `"evil"` に変換
 3. `MODIFY` を即座に terminal な結果として返す。**IntentAlignment はスキップ**
 4. `write_file(path="evil", content="...")` が**実行される**
 
-ここで重要なのは、**もしこのルールが存在しなかったら**という比較である。その場合この呼び出しは `None` → IntentAlignment に渡り、シナリオ4（意図外の delete_file を動的に検知して DENY する）と同じロジックで「意図は read のみなのに write_file が来た」として **DENY されていたはず**。
+もしこのルールが存在しなかったら、`None` → IntentAlignment に渡り、シナリオ4（意図外の delete_file を動的に検知して DENY する）と同じロジックで「意図は read のみなのに write_file が来た」として **DENY されていたはず**。
 
-つまり `unsafe_write_path` ルールは、「危険なパスを安全にする」という安全策のはずが、**「意図外の write をそもそも検知する機会」を奪っている**。ルールが無い方が、まだ安全（意図外として DENY される）。安全策が、既存の防御層（意図外検知）を迂回させてしまう、という逆説的な構造になっている。
+### DEFER のケース
 
-## 5. 一般化: DENY/DEFER と MODIFY の非対称性
+エージェントが `delete_file(path="notes.txt")` を本番・メンテナンス窓外で呼ぶ（`.conf/.db` 等ではないので `deny_critical_file_delete_in_prod` は不発火）。
 
-PolicyEngine が Step 0 で **DENY や DEFER** を確定させるのは、安全側に倒れる。これらは「実行させない/保留する」方向なので、IntentAlignment をスキップしても、最悪「過剰に保守的」になるだけ（IntentAlignment なら ALLOW したかもしれないものを止める）。**危険なアクションを通す方向には倒れない**。
+1. `production_delete_defer` が発火（環境・タイミングのみで判定）
+2. `DEFER` を即座に terminal な結果として返す。**IntentAlignment はスキップ**
+3. `DeferralResolver.resolve()` が呼ばれる。LLM に `user_intent`・`derived_signals`・`proposed_action`・`original_deferral_reason`（="本番環境かつメンテナンス窓外での削除操作のため..."）を渡す
+4. `DeferralResolver` の CRITICAL CRITERIA は「`original_deferral_reason` が高リスクな環境/操作ルールに関わる場合、`derived_signals` に異常が無くても ALLOW してはならず、**STEP_UP に格上げ**」を指示する
+5. 結果は **STEP_UP**。承認者に提示される `reason` は「本番環境かつメンテナンス窓外での削除操作のため、追加の実行トレース検証が必要」であり、**「意図は read のみなのに delete_file が来た」という、本来 DENY の根拠だったはずの情報は提示されない**
 
-一方 **MODIFY** は「実行させる」方向の決定である。これを Step 0 で確定させると、**IntentAlignment なら DENY/DEFER したはずのアクションが、パラメータの安全化だけを理由に実行されうる**。
+もしこのルールが存在しなかったら、`None` → IntentAlignment に渡り、Table I の「Context-Dependent Deny: misalignment detected → DENY」のロジックで **DENY** されていたはず。
 
-R3 の整理（forbidden だけがコンテキスト評価省略を許される、それ以外は何らかのコンテキスト評価を経る）と、この非対称性は整合する。「実行に至らない決定（DENY/DEFER）の即時確定」は forbidden の精神（ハード制限、文脈不要）に近いが、「実行に至る決定（MODIFY）の即時確定」は、forbidden にも他のどのカテゴリにも当てはまらない。
+### 両者に共通する構造
 
-## 6. 設計案（未確定 — yukinorinkt の設計判断）
+どちらのケースも、**静的ルールは「意図とは無関係な軸」（パスの危険性、本番環境のタイミング）で判断し、その判断が確定してしまうことで、「意図整合性」という別の軸の評価機会が失われる**。MODIFY のケースは DENY されるべきものが実行に至る。DEFER のケースは DENY されるべきものが STEP_UP（人間が承認すれば実行に至る、かつ承認者には「意図外」という最重要情報が提示されない）に変わる。**いずれも「実行に至る経路が、意図整合性チェックを経ずに開く」**という同じ構造。
 
-> 以下は仕様が指定したものではなく、R3（context-dependent actions はコンテキストに対して評価されること）と
-> 上記の非対称性から導いた**設計案の一つ**。
+## 5. 一般化: DENY だけが安全に terminal（§5 の旧版からの訂正）
 
-### PolicyEngine の MODIFY を非終端にする
+> 旧版の本メモは「DENY/DEFER の即時確定は安全側、MODIFY の即時確定は危険」と整理していた。
+> §4 の DEFER の検証により、**この整理は誤りだった**。DEFER も MODIFY と同型の問題を持つ。
+> 正しい一般化は以下の通り。
 
-`unsafe_write_path` のような MODIFY ルールが発火しても、`_evaluate_rules` は **terminal な `AuthorizationResult` を返さない**。代わりに「変換後のパラメータ」と「発火したルールの `policy_rule_id`」を、継続情報として `runtime.intercept` に渡す。
+PolicyEngine が Step 0 で **DENY** を確定させるのは、常に安全側に倒れる。DENY は「実行させない」終端であり、IntentAlignment をスキップしても、最悪「過剰に保守的」になるだけ（IntentAlignment なら ALLOW したかもしれないものを止める）。**危険なアクションを通す方向には倒れない。** これは、その DENY ルールが「本当に forbidden（ハード制限）か」を問わず成立する。静的ルールが下す DENY は、結果として常に「ハード制限を追加した」のと同じ安全性を持つ。
 
-`runtime.intercept` は、変換後のパラメータを適用した（修正済みの）アクションで **IntentAlignment を呼ぶ**。IntentAlignment は「意図に沿っているか」を、**変換後のアクション**に対して評価する。
+一方、**DENY 以外の4値（ALLOW・MODIFY・DEFER・STEP_UP）はすべて、何らかの形で「実行に至る経路」を持つ**。ALLOW は直接実行。MODIFY は変換後に実行。DEFER は DeferralResolver の解決を経て ALLOW/STEP_UP（→人間承認で実行）になりうる。STEP_UP は人間承認で実行になりうる。これらを Step 0 で確定させると、**IntentAlignment なら DENY としたはずのアクションが、これらの経路のいずれかを通って実行に至りうる**。
 
-最終的な決定は IntentAlignment の判断になる:
+**R3・Table I との対応**: forbidden（→即DENY、コンテキスト評価不要）のみがコンテキスト評価省略を許される。Context-Dependent Deny（Policy Baseline=ALLOW、misalignment detected→DENY）は、**静的な ALLOW 相当の判断を、コンテキスト評価が DENY に上書きする**形を示している。この「静的判断 → コンテキスト評価による上書きの可能性」という構造を、DENY 以外の全決定に一般化したものが、次節の設計案。
 
-- IntentAlignment が ALLOW → 最終決定は **MODIFY**（パラメータ変換 + 意図確認済み）。`modified_params` と `policy_rule_id` は引き続き receipt に記録される
-- IntentAlignment が DENY/DEFER/STEP_UP → そちらが最終決定
+## 6. 設計案（未確定 — yukinorinkt の設計判断）: 提案/上書きモデル
 
-シナリオ7（意図に沿った要約の書き出し、パスだけ危険）は、変換後のアクション（安全なパスへの write）も意図に沿っているので IntentAlignment も ALLOW し、結果は変わらない。一方、§4 の意図外 write のケースは、パスが安全化されても IntentAlignment が「意図外」として DENY/DEFER できるようになる。
+> 以下は仕様が指定したものではなく、R3・式(3)・Table I（Context-Dependent Deny の上書き構造）から導いた**設計案の一つ**。
+
+### 概要
+
+`PolicyEngine.evaluate(a, C, E)` を、**式(3)の π を完全に実現する単一の関数**にする。IntentAlignment は、この関数の**内部協力者**になる（laarma の用語では PolicyEngine が AARM の「Policy Engine」に対応し、IntentAlignment はその内部実装の一部、という位置づけ）。`runtime.intercept()` は `policy_engine.evaluate(...)` を呼ぶだけになり、戻り値は常に terminal（5値のいずれか）。`if result is None: ...` という分岐は不要になる。
+
+`evaluate()` 内部のロジックは、静的ルールの `decision` 値によって2つに分かれる:
+
+**`decision == DENY` の場合 → そのまま terminal。** IntentAlignment は呼ばない。§5の通り、これは常に安全。
+
+**`decision` がそれ以外（ALLOW・MODIFY・DEFER・STEP_UP、および「マッチするルールが無い」場合の暗黙の ALLOW）の場合 → それは「提案」にすぎない。** IntentAlignment に渡して確認を取る:
+
+- `decision == MODIFY` の場合、変換後のアクション `a'` を IntentAlignment に渡す
+- それ以外（暗黙の ALLOW を含む）の場合、元のアクション `a` を IntentAlignment に渡す
+
+IntentAlignment の結果が **ALLOW** → 静的ルールの**提案が確定**する（`decision`・`modified_params`・`policy_rule_id` はそのまま採用）。
+
+IntentAlignment の結果が **ALLOW 以外（DENY/DEFER/STEP_UP）** → IntentAlignment の判断が**最終決定として上書き**する。
+
+### 「マッチするルールが無い」場合も同じモデルに統一される
+
+現状の `policy_engine.evaluate()` が `None`（マッチするルールが無い）を返すケースは、新モデルでは「**提案 = ALLOW（変換なし、`a'=a`）**」として扱える。IntentAlignment が `a` を評価し、ALLOW なら提案確定（=ALLOW）、それ以外なら上書き。これは**現状の `None → IntentAlignment.evaluate(a,...)` という挙動と完全に同じ**であり、新モデルは現状の挙動を「提案=ALLOW のケース」として包含する。つまり、**新モデルは既存の動作を壊さず、MODIFY・DEFER・STEP_UP のケースに同じロジックを拡張するだけ**。
+
+### policy.yaml に「意図確認が必要」フラグは持たせない
+
+検討の過程で「ルールごとに `needs_intent_check: true/false` のようなフラグを持たせる」案も考えたが、**採用しない**。
+
+理由: そのようなフラグを追加すると、ルール作者がフラグを書き忘れる・誤って `false` にする、という**新しい失敗モードを作る**。これは §4 で見つかった問題（`production_delete_defer` が「意図確認が必要」であることがどこにも明示されていなかった）と**同じ形の穴**であり、穴を塞ぐために同じ形の穴をもう一つ開けることになる。
+
+代わりに、**`decision == DENY` かどうかという、既存のフィールドの値から自動的に決まる**。DENY は terminal、それ以外は全て提案として IntentAlignment を経由する。ルール作者は「このルールは意図確認が必要か」を意識する必要が無く、**意識しなくても安全側に倒れる**（DENY 以外は常に確認される）。
+
+### §4 のシナリオがどう変わるか
+
+**MODIFY のケース**: `unsafe_write_path` → 提案 MODIFY（`a'` = basename後）。IntentAlignment が `a'` を評価。シナリオ7（意図に沿った要約の書き出し）は ALLOW → MODIFY 確定（**結果は変わらない**）。§4 の意図外 write（`/etc/cron.d/evil`）は IntentAlignment が DENY → **DENY で上書き**。
+
+**DEFER のケース**: `production_delete_defer` → 提案 DEFER。IntentAlignment が `a`（元のアクション）を評価。シナリオ6（ユーザーが実際に削除を依頼）は ALLOW → DEFER 確定（**結果は変わらない**、従来どおり DeferralResolver へ）。§4 の意図外 delete は IntentAlignment が DENY → **DENY で上書き**。`production_delete_defer` の `reason` も `DeferralResolver` も一切呼ばれず、**情報が失われる経路自体が発生しない**。
 
 ### STEP_UP に modified_params が乗るケースの扱い
 
-上記の設計で、IntentAlignment が変換後のアクションに対して STEP_UP を返すケースがありうる。このとき:
+提案が MODIFY（`a'`）で、IntentAlignment が `a'` を評価して STEP_UP を返すケースがありうる。このとき:
 
 - **`decision` は標準の5値の1つである `STEP_UP` のまま**にする（R4 の決定モデルを拡張しない）
 - `modified_params`（PolicyEngine が施した変換）は、**承認者に提示する「完全なアクションコンテキスト」の一部**として receipt に残す。これは R4 の STEP_UP 要件「承認者には完全なアクションコンテキストが利用可能でなければならない」と整合する
@@ -166,63 +242,38 @@ R3 の整理（forbidden だけがコンテキスト評価省略を許される�
 
 ### STEP_UP（modified_params あり）が承認された場合の最終結果: ALLOW か MODIFY か
 
-上記がさらに先送りしていた論点がある。**人間が承認した後、最終的な receipt の `decision` は ALLOW なのか MODIFY なのか。**
+**仕様は1段階モデル、本設計案は2段階モデル**。§2 の式(3)は「ある1つの a を1回評価して5値のうち1つを返す」1段階モデルで、ALLOW の「unchanged」と MODIFY の「transformed」は同じ a を基準にした話。
 
-#### 仕様は1段階モデル、laarma の設計案は2段階モデル
+本設計案は2段階になる: (1) PolicyEngine が元のアクション a を a'（変換後）に書き換える、(2) IntentAlignment が a' を評価し STEP_UP を返す、(3) 人間が承認 → a' が実行される。ここで「unchanged」「transformed」は、承認者に見せた a'（＝実行されるもの）を基準にすれば ALLOW、エージェントが最初に提案した a を基準にすれば MODIFY、と**基準点によって答えが分岐する**。仕様の1段階モデルはこの分岐を想定していない。
 
-§2 で見たとおり、R4・式(3)は「ある1つの a を1回評価して5値のうち1つを返す」**1段階モデル**である。この世界では a は1つしかなく、ALLOW の「unchanged」と MODIFY の「transformed」は、同じ a を基準にした話で、両者の間に曖昧さは生じない。
-
-ところが本メモの設計案は **2段階**になっている。
-
-1. PolicyEngine が元のアクション a を a'（変換後）に書き換える
-2. IntentAlignment が a' を評価し、STEP_UP を返す
-3. 人間が承認 → a' が実行される
-
-ここで「unchanged」「transformed」は、**どちらの a を基準にするかで答えが変わる**。承認者に見せた a'（＝実行されるもの）を基準にすれば「a' がそのまま実行された」→ ALLOW。エージェントが最初に提案した a を基準にすれば「a が a' に変換されて実行された」→ MODIFY。
-
-**仕様の1段階モデルは、この基準点が分岐するケースを想定していない。** ALLOW でも MODIFY でも、どちらを選んでも仕様が明示的に答えを与えているわけではない。**この組み合わせ（複数段階の評価を経て a が書き換わった上での STEP_UP 承認）自体が、仕様が明示的に扱っていない領域である。**
-
-#### STEP_UP の解決先（ALLOW/DENY のみか）について
-
-仕様の STEP_UP 要件（§2）は承認/却下の二値ゲートとしての操作を記述するのみで、「承認された場合に `decision` が何になるか」を明記していない。「STEP_UP は ALLOW/DENY のみに解決される」という想定も、「MODIFY にも解決されうる」という想定も、**どちらも仕様の文言からは導けない**。仕様が MODIFY を STEP_UP の解決先として明示的に排除しているわけではないが、明示的に含めているわけでもない。
-
-#### laarma の選択（未確定）
-
-仕様が空白である以上、**R4 自身の定義（unchanged / transformed）に最も整合する基準点を選ぶ**のが一案である。
-
-R4 の定義における a は、π:(a,C)→{...} の a、すなわち**最初に評価対象になったアクション**と読むのが自然。2段階設計でこれに対応するのは、**エージェントが最初に提案した（変換前の）アクション**である。これを基準にすれば、a' が実行された時点で a と異なる → **最終決定は MODIFY**。
-
-人間が承認した、という事実は `decision` とは別に、`AuthorizationResult.resolution_method`（例: `"human_approved"`）で記録できる。役割分担としては、`decision` =「最終的に何が実行されたか（最初の a と比べて変わったか）」、`resolution_method` =「どう解決されたか（人間の承認を経たか）」、という整理になる。
+**laarma の選択（未確定）**: R4 の定義における a は π:(a,C)→{...} の a、すなわち**最初に評価対象になったアクション**と読むのが自然。これを基準にすれば、a' が実行された時点で a と異なる → **最終決定は MODIFY**。人間が承認した事実は `decision` とは別に `resolution_method`（例: `"human_approved"`）で記録する。
 
 逆に「ALLOW + modified_params（元と異なる）」を選ぶと、R4 の ALLOW の定義（unchanged）と `modified_params` が non-null であるという事実が、字面上で矛盾する。
 
 **したがって本メモでの暫定的な方向性は、「最終決定は MODIFY、`resolution_method=human_approved` を併記」**とする。ただしこれも仕様が指定したものではなく、**R4 の定義との整合性から導いた laarma の設計選択（仕様外拡張）**であることに変わりはない。
 
-### Step 0（PolicyEngine の terminal 出力）として残るのは DENY と DEFER のみ
+### レシートへの記録（フォレンジック、R5）
 
-§5 の非対称性に基づき、PolicyEngine が IntentAlignment を経ずに terminal な結果を返してよいのは **DENY と DEFER のみ**とする。MODIFY（および将来 ALLOW を静的に返すルールが追加される場合も同様）は、必ず IntentAlignment（または `_skip_intent_alignment_for_testing` 時のスタブ）を経由する。
+静的ルールの「提案」が IntentAlignment によって**上書き**された場合、レシートには両方の情報を残す: 提案した `policy_rule_id` と提案された `decision`（例: `production_delete_defer` が DEFER を提案）、および最終的な `decision`（例: IntentAlignment による DENY）とその `reason`。これにより「どの静的ルールが発火し、それが意図整合性チェックでどう判断されたか」が事後に追跡できる（R5 のフォレンジック要件）。
 
 ## 7. 影響範囲とスモールステップ案
 
-この変更は #43・#56 規模の一行修正ではなく、`runtime.py` の制御フロー変更を伴う。
+この変更は #43・#56 規模の一行修正ではなく、`runtime.py`/`policy_engine.py` の制御フロー変更を伴う。
 
-1. **`policy_engine.py`**: MODIFY ルール発火時の戻り値の形を変える。terminal な `AuthorizationResult` ではなく、「変換後パラメータ + `policy_rule_id`」を表す中間データ（例: `(None, modified_params, policy_rule_id)`）を返すようにする。DENY/DEFER は従来どおり terminal。
-2. **`runtime.py`**: `intercept()` で、PolicyEngine が「変換後パラメータ」を返した場合、それを適用したアクションで IntentAlignment を呼ぶ。最終結果に `modified_params` と `policy_rule_id` を引き継ぐ（IntentAlignment の reason とは別に、ポリシーが事前変換した事実を残す）。IntentAlignment が STEP_UP を返した場合、承認後の最終 `decision`（§6「STEP_UP（modified_params あり）が承認された場合の最終結果」）の扱いを実装する。
-3. **`intent_alignment.py`**: 変換後のアクション（元のアクションではない）を評価する呼び出しになることを確認・調整する。
-4. **`benchmark.py`**: `--mode policy-engine`（`_skip_intent_alignment_for_testing=True`）のとき、MODIFY ルールが発火した場合の挙動を定義する。現在 `_POLICY_ENGINE_DECISIONS = {DENY, DEFER, MODIFY}` は MODIFY を「PolicyEngine だけで判定可能」として扱っているが、新設計では MODIFY は IntentAlignment（またはそのスキップスタブ）の結果に依存する。スキップ時は「変換後パラメータで ALLOW」相当として `decision=MODIFY, decision_source=policy_engine` を返す、といった定義が必要。
-5. **回帰ケース追加**: §4 のような「意図外 write、パスは危険」のケースを benchmark に追加し、変換後も DENY/DEFER になることを確認する（pipeline モード、LLM 必要）。シナリオ7相当（意図に沿った write）の結果が変わらないことも確認する。STEP_UP 承認後に `decision=MODIFY, resolution_method=human_approved` となるケースの確認も追加する。
-
-## 8. 未検討の関連論点
-
-§2 の Table I を見ると、コンテキスト評価が「Ignored」なのは Forbidden の1行だけで、他の全カテゴリ（Context-Dependent Deny/Allow/Defer、Standard Allow/Deny）は何らかのコンテキスト評価を前提としている。
-
-`policy.yaml` には MODIFY 以外にも、静的ルールで DENY や DEFER を terminal に返すものがある（例: `deny_critical_db_delete_in_prod` のような本番環境での `.db` ファイル削除の即時 DENY、本番・メンテナンス窓外の DEFER）。§5 では「DENY/DEFER の即時確定は安全側に倒れるので問題ない」と整理したが、これは**安全性の観点**であり、**R3 適合性（これらのルールが forbidden に分類できるか、それとも context-dependent として本来コンテキスト評価を要するか）**は別の問題である。
-
-本セッションでは MODIFY に絞って検討した。他の静的 DENY/DEFER ルールが forbidden（ハード制限、文脈不要）として正当化できるか、それとも同様の論点を抱えるかは、**未検討**。別途の検討課題とする。
+1. **`policy_engine.py`**: `PolicyEngine` のコンストラクタに `IntentAlignment`（またはそのスタブ）を注入できるようにする。`evaluate()` は常に terminal な `AuthorizationResult` を返す。内部で、静的ルール評価の結果が `DENY` ならそのまま返す。`DENY` 以外（マッチするルールが無い場合の暗黙 ALLOW を含む）は「提案」として、対応するアクション（MODIFY の場合は変換後の `a'`、それ以外は `a`）で内部の IntentAlignment を呼び、ALLOW なら提案を確定、それ以外なら上書きする。
+2. **`runtime.py`**: `intercept()` を簡素化。`result = self._policy_engine.evaluate(action, self._accumulator.context, self._environment)` のみになり、`if result is None: ...` および `self._intent_alignment` フィールドは不要になる。IntentAlignment が STEP_UP を返した場合の承認後の最終 `decision`（§6「STEP_UP（modified_params あり）が承認された場合の最終結果」）の扱いを実装する。
+3. **`benchmark.py`**: `--mode policy-engine` を、runtime レベルの `_skip_intent_alignment_for_testing` フラグ（env var ゲート付き）ではなく、`PolicyEngine` へスタブ IntentAlignment を注入する形に再定義する。スタブは「常に ALLOW を返す」ことで、静的ルールの「提案」がそのまま確定する（= 現在の `_POLICY_ENGINE_DECISIONS` の挙動を再現）。
+4. **回帰ケース追加**:
+   - §4 の「意図外 write、パスは危険」（MODIFY→上書きDENY）
+   - §4 の「意図外 delete、本番・窓外」（DEFER→上書きDENY）
+   - シナリオ6・7相当（意図に沿った操作）の結果が変わらないこと（提案確定）
+   - STEP_UP 承認後に `decision=MODIFY, resolution_method=human_approved` となるケース
+   - レシートに「提案」と「上書き」の両方の情報が記録されること
 
 ## 関連
 
 - `laarma_sdk/src/laarma/runtime.py` の `intercept()`
 - `laarma_sdk/src/laarma/policy_engine.py` 冒頭の設計注記
-- `my_project/policies/policy.yaml` の `unsafe_write_path`
-- README の仕様準拠状況: R3（意図整合性評価）は「✅ 準拠」としているが、本メモの問題はその下にある MODIFY 経路の話
+- `my_project/policies/policy.yaml` の `unsafe_write_path`、`production_delete_defer`
+- `laarma_sdk/src/laarma/deferral.py` の `DeferralResolver`（CRITICAL CRITERIA）
+- README の仕様準拠状況: R3（意図整合性評価）

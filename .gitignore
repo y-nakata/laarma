@@ -4,3 +4,11 @@ __pycache__/
 .DS_Store
 aarm_audit.jsonl
 .env
+
+# アイデンティティ署名の秘密鍵・鍵ペア（non-repudiation / R6）
+# 各主体（Human/Agent/Service）の秘密鍵は決してコミットしない。
+# 公開鍵(.pub)は本来コミット可能だが、デモ用の自己生成鍵ペアは
+# 秘密鍵とまとめて無視し、リポジトリに鍵を一切置かない方針とする。
+*.key
+*.pem
+keys/

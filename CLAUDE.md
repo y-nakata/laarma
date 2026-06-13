@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Laarma** は [CSA AARM 仕様](https://aarm.dev/spec) の Python プロトタイプ実装。AI エージェントのツール呼び出しを実行前にインターセプト・評価・記録する。
 
+> **設計方針の正典は `docs/design/` の設計メモ**。本ファイル（CLAUDE.md）の記述と設計メモが食い違う場合は、**設計メモを優先**し、その相違を報告すること。本ファイルは設計メモの内容を実装作業向けに要約・参照するものであり、方針転換の直後などに一時的に古くなっている可能性がある。
+
 ## セットアップ
 
 ```bash

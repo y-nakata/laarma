@@ -25,7 +25,7 @@ python my_project/benchmark.py   # ベンチマーク実行
 |---------|---------|------------|
 | SDK | `laarma_sdk/src/laarma/*.py` | AARM の主体 |
 | エージェント | `my_project/agent.py` | **AARM を知らない**（意図的）|
-| ツール定義 | `my_project/tools.py` | `ToolRiskClass` の宣言のみ |
+| ツール定義 | `my_project/tools.py` | ツールスキーマと実装のみ（リスク分類などの AARM 概念は持たない）|
 | エントリーポイント | `my_project/demo.py` | AARM を組み立てて注入する |
 | ポリシーファイル | `my_project/policies/policy.yaml` | PAP — 静的ポリシー定義 |
 
@@ -46,21 +46,26 @@ agent.proxy.call(tool, params)
 
 ## 主要モジュール
 
-- `models.py` — Decision, ToolRiskClass, Action, SessionContext, AuthorizationResult
+- `models.py` — Decision, Action, IdentityContext, SessionContext, AuthorizationResult
 - `policy_engine.py` — 式(3)の π。静的ルール評価 + 内部協力者 IntentAlignment による意図確認（提案/上書きモデル）
 - `policy_loader.py` — PAP: YAML/JSON ポリシーファイルを `Policy` に変換する
-- `context_accumulator.py` — R2 コンテキスト蓄積と派生シグナル (δ) の計算
+- `context_accumulator.py` — R2 コンテキスト蓄積と派生シグナル (δ) の計算（data_classification / semantic_distance / scope_expansion / entity_set / confidence_level）
 - `intent_alignment.py` — Claude LLM による (a, C, E) 評価
 - `deferral.py` — DEFER 解決ワークフロー（追加コンテキスト収集 → 再評価）
 - `step_up_resolver.py` — STEP_UP 人間承認ワークフロー
 - `distance_calculator.py` — セマンティック距離計算（embedding / keyword の戦略パターン）
+- `environment.py` — EnvironmentContext / MaintenanceWindow（環境・タイミング条件）
 - `runtime.py` — R1–R6 統合オーケストレーション
 - `tool_proxy.py` — エージェントとツール実装の間に挟まる透過的インターセプタ
 
 ## 設計上の重要な注意点
 
-**`ToolRiskClass` は AARM 仕様外の妥協**
-READ_ONLY/WRITE/DESTRUCTIVE による静的ツール分類は AARM 仕様に存在しない。距離計算精度が向上するまでのフォールバックとして存在する。将来的には除去される。
+**リスク把握はデータ分類シグナル（δ）で行う。静的なツールリスク等級の型は持たない**
+かつて存在した `ToolRiskClass`（READ_ONLY/WRITE/DESTRUCTIVE の enum）は**除去済み**。現在、アクションの危険性の把握は次の2つが担う:
+- **`data_classification`**（`context_accumulator.py` の `_classify_data`）— アクセスしたデータの機密レベル（PII / CONFIDENTIAL / SENSITIVE_TOOL / PUBLIC）を、ツール名とパラメータの文字列から動的にラベル付けする。これは AARM §IV-C の派生シグナル δ の一つであり**仕様準拠**。
+- **`destructive_tools` / `sensitive_tools`**（`context_accumulator.py` のデフォルト frozenset、policy で上書き可能）— ツール名の集合。データ分類とスコープ判定の補助に使う設定値であって、enum 型のリスク等級ではない。
+
+つまり「ツールに固定のリスク等級を持たせる」のではなく、「アクセスしたデータと文脈からリスクを動的に把握する」方向に寄せてある。新たに静的なツールリスク型を再導入しないこと。
 
 **`PolicyEngine` は R3・式(3) の π そのもの（提案/上書きモデル）**
 `PolicyEngine.evaluate(a, C, E)` は式(3) `π:(a,C)→{ALLOW,DENY,MODIFY,STEP_UP,DEFER}` を完全に実現する単一の関数であり、常に terminal な `AuthorizationResult` を返す。`IntentAlignment` は別レイヤーではなく **`PolicyEngine` の内部協力者**（コンストラクタ注入）。`runtime.intercept()` は `evaluate()` を呼ぶだけで、`IntentAlignment` を直接は知らない。

@@ -112,7 +112,7 @@ STEP_UP の MUST 要件は操作的な記述に留まる: 承認が得られる�
 
 → **MODIFY と STEP_UP は、同じ (a,C) に対する互いに排他的な決定値**として定義されている。「変換後のパラメータを STEP_UP として人間に提示する」という組み合わせは、この形式モデルには現れない。
 
-この式(3)は、**ある1つの a を1回評価して5値のうち1つを返す、1段階のモデル**である点にも注意が必要。ALLOW の「unchanged」も MODIFY の「transformed」も、同じ a を基準にした話であり、評価が複数段階に分かれて a 自体が書き換わっていく、という状況は想定されていない。
+この式(3)が定めるのは、**π の入出力契約**——「ある (a,C) を入れたら5値のうち1つが出る」——だけである。π の内部で評価が何段あるか、評価対象が途中で a→a' と書き換わるか、収束ループを回すかは、**仕様の規定外（ブラックボックス）**であり、式(3)はそれらを禁じも要求もしていない。ただし、π の出力に現れる ALLOW の「unchanged」/ MODIFY の「transformed」が**何を基準とした unchanged/transformed なのか**——すなわち「最初に π に入った a」を基準とするのか、内部で書き換えられた中間状態を基準とするのか——は、式(3)の表面からは一意に読み取れない。この基準点の問題は §6「STEP_UP（modified_params あり）が承認された場合の最終結果」で扱う。
 
 **式(3)の最も重要な点**: π は `(a, C)` の両方を入力に取る、**単一の関数**である。laarma の現状（PolicyEngine が `(a,C,E)` の一部だけ見て None を返し、別関数 IntentAlignment が `(a,C,E)` 全体を見る、という2関数構成）は、**π を2つに分割した実装**になっている。この分割自体が、§1 の問題を生んでいる。
 
@@ -252,16 +252,32 @@ IntentAlignment の確認の目的は、**「このアクションが意図に�
 
 したがって required_params 不足は「DEFER の**提案**」であって「DEFER の確定」ではない。他の非 DENY 提案と同様、必ず IntentAlignment を通す。意図に沿っていれば DEFER 確定 → DeferralResolver が補完。意図外なら IntentAlignment が DENY に上書き → 補完に入る前に停止。
 
-### MODIFY 変換と required_params の評価順序
+### MODIFY 変換は「アクションの書き換え」なので、書き換え後に再評価して収束させる
 
-MODIFY が他の決定と異なり厄介なのは、**それが「決定」であると同時に「アクションそのものの書き換え（a→a'）」でもある**点である。他の4決定（ALLOW/DENY/DEFER/STEP_UP）はアクションの処遇を決めるだけでパラメータをいじらないが、MODIFY だけが評価の途中で対象を別物に変える。したがって、MODIFY 変換より後に行う評価は、必ず「変換後の a'」に対して行わなければならない。
+MODIFY が他の決定と異なり厄介なのは、**それが「決定」であると同時に「アクションそのものの書き換え（a→a'）」でもある**点である。他の4決定（ALLOW/DENY/DEFER/STEP_UP）はアクションの処遇を決めるだけでパラメータをいじらないが、MODIFY だけが評価の途中で対象を別物に変える。
 
-`required_params` の判定も例外ではない。**MODIFY 変換（あれば）を先に1回かけ、required_params は変換後の a' に対して判定する**。これは式(3)の modification function `f(a)→a'` が「d=MODIFY のとき適用され、a' が実際に評価・実行される対象になる」という構造とも整合する。
+ここから重要な帰結が出る。**評価対象を途中で書き換えたなら、書き換え後のアクションにもうマッチするルールが無くなるまで、ルール評価をやり直さなければならない**。a を a' に変換した時点で、a' は「まだ評価されていない新しいアクション」であり、a' が別のルール（別の MODIFY、あるいは DENY）にマッチするかもしれない。それを見ずに「a' で確定」とするのは、評価をやり残している＝ final な状態に落ち着いていない。
 
-- a' で required_params が揃えば → MODIFY 提案のまま
-- a' でも不足なら → **変換を保持したまま**（元の危険な a に戻さない。DeferralResolver が危険な a を相手にするのを避けるため）DEFER 提案に切り替える。`modified_params` は提案に乗せ続ける（`decision=DEFER` だが `modified_params` あり、という状態。STEP_UP+modified_params と同じ構造で、データモデルは許容する）
+具体例: ルールA「パスが `^/` なら basename 化」、ルールB「ファイル名が `evil` を含むなら DENY」があるとき、`write_file(path="/etc/cron.d/evil")` はルールA で `path=evil` に変換される。ここで1パスで打ち切ると、`evil` がルールB（DENY）にマッチするのを見逃して危険なファイル名がすり抜ける。a' を再評価していればルールB が DENY で止められた。
 
-**多段にはしない**。a' を再びルール評価に回して別の MODIFY を発火させる、といったループは行わない。式(3)は1段階モデルであり（§2）、MODIFY 変換は1パスにつき1回。
+> **方法論上の補足**: 「式(3)が1段階モデルだから多段評価をしない」という論証は**誤り**であり、本メモは採らない。式(3)の π は入出力契約（(a,C) を入れたら5値のどれかが出る）を定めるだけで、π の内部で評価が何段あるか・収束ループを回すかは**仕様の規定外（ブラックボックス）**である。実際、本メモの設計では π の内部に「静的ルール評価 → IntentAlignment 確認」という多段構造を既に置いている。内部で収束ループを回すことは式(3)と矛盾しない。
+
+#### 収束ループの規則
+
+- 静的ルール評価は、**マッチするルールが無くなるまで反復**する。
+  - MODIFY がマッチしたらアクションを変換し、**変換後のアクションで再評価**する（変換は累積する）。
+  - 途中で **DENY がマッチしたら、そこで terminal DENY**（即終了）。
+  - マッチするルールが尽きたら、その時点のアクション（変換が累積した a'）を「提案」として次段（required_params 判定 → IntentAlignment）へ渡す。
+- **振動・無限ループ対策は「反復回数の上限」のみ**とする。「同じルールを二度発火させない」という条件は**採らない**（ルール内容次第で、正当な多段適用を不当に打ち切る一方、2ルールが往復する振動は各ルール1回ずつなので検知できず、二重に筋が悪い）。反復回数という外形だけで打ち切るほうが、ルールの意味解釈に依存せず堅牢。
+- **上限到達時（収束しなかった場合）は DENY**。ここに到達するのは実質的に**ルール設定の誤り**（ルールが振動している）であり、DEFER にしても DeferralResolver が追加コンテキストを集めて解決する見込みはなく、STEP_UP にしても承認者に判断材料が無い。設定ミス起因の異常は安全側に倒して止める（§5「DENY だけが安全に terminal」と一致）。
+- 反復上限はパラメータ `max_modify_iterations` として**カスタマイズ可能**とする。**デフォルトは 10**。これは正常系のチューニングパラメータではなく、**異常（ルール振動）を捕まえるセーフティネット**である。正当な MODIFY 変換の連鎖はまず数段に収まるため、通常はこの上限に到達しない。実運用で正当な連鎖がより深くなりうる場合は、運用側で引き上げられる（AARM 仕様が cascading deferral 上限などを configurable と求めているのと同じ流儀）。
+
+#### required_params の判定タイミング
+
+`required_params` の判定は、**この収束ループでマッチするルールが尽きた後の最終的な a' に対して**行う（ループ途中の中間状態ではない）。
+
+- 最終 a' で required_params が揃えば → MODIFY 提案のまま
+- 最終 a' でも不足なら → **変換を保持したまま**（元の危険な a に戻さない。DeferralResolver が危険な a を相手にするのを避けるため）DEFER 提案に切り替える。`modified_params` は提案に乗せ続ける（`decision=DEFER` だが `modified_params` あり、という状態。STEP_UP+modified_params と同じ構造で、データモデルは許容する）
 
 ### IntentAlignment に渡すアクションは `modified_params` の有無で決める（decision では決めない）
 
@@ -292,9 +308,9 @@ DEFER 提案が IntentAlignment を通って DEFER 確定した後、DeferralRes
 
 ### STEP_UP（modified_params あり）が承認された場合の最終結果: ALLOW か MODIFY か
 
-**仕様は1段階モデル、本設計は2段階モデル**。§2 の式(3)は「ある1つの a を1回評価して5値のうち1つを返す」1段階モデルで、ALLOW の「unchanged」と MODIFY の「transformed」は同じ a を基準にした話。
+**問題は「unchanged/transformed の基準点」**。§2 で見たとおり、式(3)は π の入出力契約を定めるだけで、ALLOW の「unchanged」/ MODIFY の「transformed」が何を基準とするかを一意には定めていない。
 
-本設計は2段階になる: (1) PolicyEngine が元のアクション a を a'（変換後）に書き換える、(2) IntentAlignment が a' を評価し STEP_UP を返す、(3) 人間が承認 → a' が実行される。ここで「unchanged」「transformed」は、承認者に見せた a'（＝実行されるもの）を基準にすれば ALLOW、エージェントが最初に提案した a を基準にすれば MODIFY、と**基準点によって答えが分岐する**。仕様の1段階モデルはこの分岐を想定していない。これは**仕様が明示的に扱っていない領域**である。
+本設計では、評価が次のように進む: (1) PolicyEngine が元のアクション a を a'（変換後）に書き換える、(2) IntentAlignment が a' を評価し STEP_UP を返す、(3) 人間が承認 → a' が実行される。ここで「unchanged」「transformed」は、承認者に見せた a'（＝実行されるもの）を基準にすれば ALLOW、エージェントが最初に提案した a を基準にすれば MODIFY、と**基準点によって答えが分岐する**。式(3)はこの基準点を明示していないため、これは**仕様が明示的に扱っていない領域**である。
 
 **laarma の決定**: R4 の定義における a は π:(a,C)→{...} の a、すなわち**最初に評価対象になったアクション**と読むのが自然。これを基準にすれば、a' が実行された時点で a と異なる → **最終決定は MODIFY**。人間が承認した事実は `decision` とは別に `resolution_method`（例: `"human_approved"`）で記録する。
 
@@ -311,9 +327,12 @@ DEFER 提案が IntentAlignment を通って DEFER 確定した後、DeferralRes
 この変更は #43・#56 規模の一行修正ではなく、`runtime.py`/`policy_engine.py` の制御フロー変更を伴う。
 
 1. **`policy_engine.py`**: `PolicyEngine` のコンストラクタに `IntentAlignment`（またはそのスタブ）を注入できるようにする。`evaluate()` は常に terminal な `AuthorizationResult` を返す。内部の流れ:
-   - 静的ルール評価の結果が `DENY`（denied_tools / privilege_scope / ルールの DENY / max_actions など）→ そのまま terminal で返す。
-   - MODIFY 変換（あれば）を先に1回かけて a' を得る（多段にはしない）。
-   - `required_params` は**変換後の a' に対して**判定する。不足があれば、**変換を保持したまま**（`modified_params` を捨てない）DEFER 提案に切り替える。
+   - **静的ルール評価を、マッチするルールが無くなるまで反復する（収束ループ）**:
+     - DENY がマッチ（denied_tools / privilege_scope / ルールの DENY / max_actions など）→ そのまま terminal で返す。
+     - MODIFY がマッチ → アクションを変換し（`modified_params` を累積）、変換後のアクションで再評価。
+     - マッチするルールが尽きたら、その時点のアクション（累積した a'）を「提案」として次へ。
+     - 反復は `max_modify_iterations`（デフォルト 10、カスタマイズ可能）で上限を設け、上限到達時は設定ミス起因の異常として **DENY**（§6「収束ループの規則」参照）。「同じルールの二度発火禁止」は採らない。
+   - 収束後の最終 a' に対して `required_params` を判定する。不足があれば、**変換を保持したまま**（`modified_params` を捨てない）DEFER 提案に切り替える。
    - こうして組み立てた「提案」（MODIFY / DEFER / 暗黙 ALLOW など、DENY 以外）を `_confirm_with_ia()` に渡す。IntentAlignment に渡すアクションは、提案の `decision` ではなく **`modified_params` の有無**で決める（あれば a'、なければ a）。
    - IntentAlignment が ALLOW なら提案を確定、それ以外なら上書きする（`proposed_decision` に元の提案 decision を記録）。
    - **terminal にしてよいのは DENY のみ**。required_params 不足のような構文的な DEFER も含め、DENY 以外は必ず IntentAlignment を経由する。
@@ -323,6 +342,8 @@ DEFER 提案が IntentAlignment を通って DEFER 確定した後、DeferralRes
    - §4 の「意図外 write、パスは危険」（MODIFY→上書きDENY）
    - §4 の「意図外 delete、本番・窓外」（DEFER→上書きDENY）
    - **意図外ツールを required_params 不足で呼ぶ → IntentAlignment が DENY に上書き**（構文的 DEFER も意図確認を通ることの回帰）
+   - **MODIFY 変換後の a' が別の DENY ルールにマッチ → 収束ループ内で DENY**（変換後の再評価が効くことの回帰）
+   - **振動するルールを設定 → `max_modify_iterations` 到達で DENY**（収束ループの上限が効くことの回帰）
    - シナリオ6・7相当（意図に沿った操作）の結果が変わらないこと（提案確定）
    - STEP_UP 承認後に `decision=MODIFY, resolution_method=human_approved` となるケース
    - レシートに「提案」と「上書き」の両方の情報が記録されること

@@ -43,7 +43,19 @@ from laarma import (
     AARMRuntime, Decision, EnvironmentContext, IdentityContext,
     MaintenanceWindow, Policy, load_policy,
 )
+from laarma.models import Action, AuthorizationResult
 from laarma.policy_engine import DEFAULT_POLICY
+
+
+class _AlwaysAllowStub:
+    """policy-engine モード用スタブ。IntentAlignment を使わず常に ALLOW を返す。"""
+    def evaluate(
+        self,
+        action: Action,
+        context_summary: dict,
+        environment: Any = None,
+    ) -> AuthorizationResult:
+        return AuthorizationResult(decision=Decision.ALLOW, reason="stub", action=action)
 
 # path 変換のドメイン知識。policy.yaml の modify_transform が参照する。
 _TRANSFORM_REGISTRY: dict[str, Any] = {
@@ -64,6 +76,7 @@ class BenchmarkCase:
     expected_decision: str
     expected_modified_params: dict[str, Any] | None
     identity: dict[str, Any] | None = None
+    pipeline_only: bool = False  # True のとき policy-engine モードでスキップ
 
 
 def load_cases(path: Path) -> list[BenchmarkCase]:
@@ -81,6 +94,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 expected_decision=data["expected_decision"],
                 expected_modified_params=data.get("expected_modified_params"),
                 identity=data.get("identity"),
+                pipeline_only=data.get("pipeline_only", False),
             ))
     return cases
 
@@ -153,7 +167,9 @@ def run_case(
     expected = Decision(case.expected_decision)
 
     # policy-engine モードでは LLM 判断が必要なケースをスキップ
-    if mode == "policy-engine" and expected not in _POLICY_ENGINE_DECISIONS:
+    if mode == "policy-engine" and (
+        expected not in _POLICY_ENGINE_DECISIONS or case.pipeline_only
+    ):
         return None, None, 0.0, "skip", None, None
 
     env = build_environment(case.environment)
@@ -182,6 +198,7 @@ def run_case(
         policy=policy,
         transform_registry=transform_registry,
         _skip_intent_alignment_for_testing=(mode == "policy-engine"),
+        _intent_alignment=(_AlwaysAllowStub() if mode == "policy-engine" else None),
     )
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])

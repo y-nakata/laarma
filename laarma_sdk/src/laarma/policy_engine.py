@@ -11,18 +11,22 @@ IntentAlignment はその内部協力者（外部から注入される）。
       → 「提案」として IntentAlignment に確認する
       → IA が ALLOW → 提案確定
       → IA が ALLOW 以外 → IA の判断で上書き（proposed_decision に元の提案を記録）
+
+収束ループ（§6「MODIFY 変換は書き換え後に再評価して収束させる」）:
+  MODIFY ルールが発火するたびにアクションを変換し、変換後のアクションでルール評価を再実行。
+  DENY が出たら即 terminal。マッチするルールが尽きたら MODIFY 提案として確定。
+  max_modify_iterations（デフォルト 10）で振動を検出し、到達時は DENY。
 """
 
 from __future__ import annotations
 
-import os
 import re
-from dataclasses import dataclass, field
-from typing import Callable
+from dataclasses import dataclass, field, replace as dc_replace
+from typing import TYPE_CHECKING, Callable
 
 from .environment import EnvironmentContext
 from .models import Action, AuthorizationResult, Decision, SessionContext
-from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from .intent_alignment import IntentAlignment
 
@@ -33,12 +37,10 @@ def _match_conditions(
     environment: EnvironmentContext | None,
 ) -> bool:
     """全条件が一致した場合に True を返す。any_of（OR）/ none_of（NOT）をサポート。"""
-    # any_of: リスト内のいずれか1つが一致すれば通過（OR 演算）
     if "any_of" in conditions:
         if not any(_match_conditions(c, action, environment) for c in conditions["any_of"]):
             return False
 
-    # none_of: リスト内のすべてが不一致なら通過（NOT 演算）
     if "none_of" in conditions:
         if any(_match_conditions(c, action, environment) for c in conditions["none_of"]):
             return False
@@ -64,28 +66,21 @@ def _match_conditions(
 
 @dataclass
 class StaticRule:
-    """
-    YAML から差し込まれる静的ルールの1エントリ。
-    conditions が全て一致したとき decision を返す。
-    """
+    """YAML から差し込まれる静的ルールの1エントリ。"""
     id:               str
     decision:         str
     reason:           str
-    conditions:       dict       = field(default_factory=dict)
+    conditions:       dict        = field(default_factory=dict)
     modify_transform: dict | None = None  # {"param_name": "transform_name"} — MODIFY 時のみ
 
 
 @dataclass
 class Policy:
-    """
-    PolicyEngine に渡すポリシー設定。
-    load_policy() で YAML/JSON ファイルから生成する。
-    """
+    """PolicyEngine に渡すポリシー設定。load_policy() で YAML/JSON ファイルから生成する。"""
     denied_tools:                   set[str]             = field(default_factory=set)
     required_params:                dict[str, list[str]] = field(default_factory=dict)
     max_actions:                    int                  = 50
     rules:                          list[StaticRule]     = field(default_factory=list)
-    # データ分類キーワード（省略時は context_accumulator.py のデフォルト値を使う）
     pii_keywords:          frozenset[str] | None = None
     confidential_keywords: frozenset[str] | None = None
     sensitive_tools:       frozenset[str] | None = None
@@ -101,6 +96,8 @@ DEFAULT_POLICY = Policy(
     },
 )
 
+_DEFAULT_MAX_MODIFY_ITERATIONS = 10
+
 
 class PolicyEngine:
     def __init__(
@@ -108,11 +105,12 @@ class PolicyEngine:
         policy: Policy | None = None,
         transform_registry: dict[str, Callable[[str], str]] | None = None,
         intent_alignment: "IntentAlignment | None" = None,
+        max_modify_iterations: int = _DEFAULT_MAX_MODIFY_ITERATIONS,
     ) -> None:
-        self._policy   = policy or DEFAULT_POLICY
-        self._registry = transform_registry or {}
-        self._ia       = intent_alignment
-        # フェイルファスト: rules が参照する変換名がレジストリに存在するか検証
+        self._policy                = policy or DEFAULT_POLICY
+        self._registry              = transform_registry or {}
+        self._ia                    = intent_alignment
+        self._max_modify_iterations = max_modify_iterations
         for rule in self._policy.rules:
             if rule.modify_transform:
                 for transform_name in rule.modify_transform.values():
@@ -137,7 +135,7 @@ class PolicyEngine:
         """
         p = self._policy
 
-        # 0. privilege_scope チェック — DENY は常に terminal（安全側）
+        # 0. privilege_scope チェック — DENY は常に terminal
         if action.identity and action.identity.privilege_scope:
             if action.tool_name not in action.identity.privilege_scope:
                 return AuthorizationResult(
@@ -156,20 +154,110 @@ class PolicyEngine:
                 decision_source="denied_tools",
             )
 
-        # 2. 設定ファイルから差し込まれたルールを評価
-        rule_result = self._evaluate_rules(action, environment)
-        if rule_result is not None and rule_result.decision == Decision.DENY:
-            return rule_result  # DENY は terminal
+        # 2. 静的ルール収束ループ
+        #    MODIFY がマッチするたびアクションを変換して再評価する。
+        #    DENY が出たら即 terminal。ルールが尽きたら MODIFY 提案（変換があれば）。
+        #    max_modify_iterations に達したら設定ミス（振動）として DENY。
+        current_params    = dict(action.parameters)
+        accumulated_mod   = None   # 累積変換結果
+        last_rule_id      = None   # 最後に発火した MODIFY ルールの ID
+        last_rule_reason  = None
+        rule_proposal     = None   # MODIFY 以外のルールがマッチした場合の提案
 
-        # 3. 必須パラメータのチェック — 構文エラーは意図整合性問題でないため terminal
-        missing = [k for k in p.required_params.get(action.tool_name, []) if k not in action.parameters]
+        for _iter in range(self._max_modify_iterations + 1):
+            if _iter == self._max_modify_iterations:
+                return AuthorizationResult(
+                    decision=Decision.DENY,
+                    reason=(
+                        f"静的ルール評価が収束しませんでした"
+                        f"（max_modify_iterations={self._max_modify_iterations} 到達）。"
+                        "ルール設定を確認してください。"
+                    ),
+                    action=action,
+                    decision_source="policy_engine",
+                )
+
+            eval_action = Action(
+                tool_name=action.tool_name,
+                parameters=current_params,
+                identity=action.identity,
+                action_id=action.action_id,
+                timestamp=action.timestamp,
+            )
+            match = self._find_matching_rule(eval_action, environment)
+
+            if match is None:
+                break  # マッチするルールが尽きた
+
+            rule, mod_params = match
+            decision = Decision(rule.decision)
+
+            if decision == Decision.DENY:
+                try:
+                    reason = rule.reason.format(**current_params)
+                except (KeyError, ValueError):
+                    reason = rule.reason
+                return AuthorizationResult(
+                    decision=Decision.DENY,
+                    reason=reason,
+                    action=action,
+                    modified_params=accumulated_mod,
+                    policy_rule_id=rule.id,
+                    decision_source="policy_engine",
+                )
+
+            if decision == Decision.MODIFY and mod_params is not None:
+                current_params  = mod_params
+                accumulated_mod = mod_params
+                last_rule_id    = rule.id
+                try:
+                    last_rule_reason = rule.reason.format(**action.parameters)
+                except (KeyError, ValueError):
+                    last_rule_reason = rule.reason
+                continue  # 変換後のアクションで再評価
+
+            # MODIFY 以外（DEFER / STEP_UP / ALLOW from rules）→ ループを抜ける
+            try:
+                reason = rule.reason.format(**current_params)
+            except (KeyError, ValueError):
+                reason = rule.reason
+            rule_proposal = AuthorizationResult(
+                decision=decision,
+                reason=reason,
+                action=action,
+                modified_params=accumulated_mod,  # それまでの MODIFY 変換を保持
+                policy_rule_id=rule.id,
+                decision_source="policy_engine",
+            )
+            break
+
+        # ループを "match is None" で抜け、かつ変換が累積していた場合 → MODIFY 提案
+        if rule_proposal is None and accumulated_mod is not None:
+            rule_proposal = AuthorizationResult(
+                decision=Decision.MODIFY,
+                reason=last_rule_reason or "",
+                action=action,
+                modified_params=accumulated_mod,
+                policy_rule_id=last_rule_id,
+                decision_source="policy_engine",
+            )
+
+        # 3. required_params のチェック — 最終 a'（current_params）に対して行う
+        #    提案（DENY 以外）として扱い、IntentAlignment を通す。
+        #    変換済み accumulated_mod は保持したまま DEFER 提案に切り替える。
+        missing = [
+            k for k in p.required_params.get(action.tool_name, [])
+            if k not in current_params
+        ]
         if missing:
-            return AuthorizationResult(
+            proposal = AuthorizationResult(
                 decision=Decision.DEFER,
                 reason=f"'{action.tool_name}' に必須パラメータが足りません: {missing}",
                 action=action,
+                modified_params=accumulated_mod,
                 decision_source="policy_engine",
             )
+            return self._confirm_with_ia(proposal, action, context_summary, environment)
 
         # 4. 最大アクション数の制限 — DENY は terminal
         action_count = sum(1 for e in context.action_history if e.get("type") != "tool_output")
@@ -181,14 +269,40 @@ class PolicyEngine:
                 decision_source="policy_engine",
             )
 
-        # 5. 提案/上書きモデル: rule_result（DENY 以外）または暗黙 ALLOW を「提案」として IA に確認
-        proposal = rule_result or AuthorizationResult(
+        # 5. 提案を IntentAlignment に確認
+        proposal = rule_proposal or AuthorizationResult(
             decision=Decision.ALLOW,
             reason="ポリシー通過。",
             action=action,
             decision_source="policy_engine",
         )
         return self._confirm_with_ia(proposal, action, context_summary, environment)
+
+    def _find_matching_rule(
+        self,
+        eval_action: Action,
+        environment: EnvironmentContext | None,
+    ) -> tuple[StaticRule, dict | None] | None:
+        """
+        eval_action に対して最初にマッチするルールと変換後パラメータを返す。
+        MODIFY でない場合の変換後パラメータは None。マッチなしは None。
+        """
+        for rule in self._policy.rules:
+            if not _match_conditions(rule.conditions, eval_action, environment):
+                continue
+
+            decision = Decision(rule.decision)
+            if decision == Decision.MODIFY and rule.modify_transform:
+                modified_params = dict(eval_action.parameters)
+                for param, transform_name in rule.modify_transform.items():
+                    transform = self._registry.get(transform_name)
+                    if transform and param in modified_params:
+                        modified_params[param] = transform(str(modified_params[param]))
+                return rule, modified_params
+
+            return rule, None
+
+        return None
 
     def _confirm_with_ia(
         self,
@@ -199,14 +313,16 @@ class PolicyEngine:
     ) -> AuthorizationResult:
         """
         提案を IntentAlignment に確認する。
-        IA が ALLOW → 提案確定。ALLOW 以外 → IA の判断で上書き（proposed_decision を記録）。
-        IA が注入されていない（スタブなし）場合は提案をそのまま確定。
+        IA が ALLOW → 提案確定。ALLOW 以外 → 上書き（proposed_decision を記録）。
+        IA が未注入の場合は提案をそのまま確定。
+
+        IntentAlignment に渡すアクションは、`modified_params` の有無で決める（decision では決めない）。
+        変換が適用されていれば実行に向かうのは a' なので IA にも a' を渡す。
         """
         if self._ia is None:
             return proposal
 
-        # MODIFY の場合は変換後のアクション a' を IA に渡す
-        if proposal.decision == Decision.MODIFY and proposal.modified_params:
+        if proposal.modified_params:
             eval_action = Action(
                 tool_name=original_action.tool_name,
                 parameters=proposal.modified_params,
@@ -222,54 +338,9 @@ class PolicyEngine:
         if ia_result.decision == Decision.ALLOW:
             return proposal  # 提案確定
 
-        # IA が上書き — policy_rule_id（発火ルール）を保持しつつ、proposed_decision を記録
-        from dataclasses import replace
-        return replace(
+        # IA が上書き — policy_rule_id（発火ルール）を保持し、proposed_decision を記録
+        return dc_replace(
             ia_result,
             policy_rule_id=proposal.policy_rule_id,
             proposed_decision=proposal.decision.value,
         )
-
-    def _evaluate_rules(
-        self,
-        action: Action,
-        environment: EnvironmentContext | None,
-    ) -> AuthorizationResult | None:
-        for rule in self._policy.rules:
-            if not _match_conditions(rule.conditions, action, environment):
-                continue
-
-            decision = Decision(rule.decision)
-
-            if decision == Decision.MODIFY and rule.modify_transform:
-                modified_params = dict(action.parameters)
-                for param, transform_name in rule.modify_transform.items():
-                    transform = self._registry.get(transform_name)
-                    if transform and param in modified_params:
-                        modified_params[param] = transform(str(modified_params[param]))
-                try:
-                    reason = rule.reason.format(**action.parameters)
-                except (KeyError, ValueError):
-                    reason = rule.reason
-                return AuthorizationResult(
-                    decision=Decision.MODIFY,
-                    reason=reason,
-                    action=action,
-                    modified_params=modified_params,
-                    policy_rule_id=rule.id,
-                    decision_source="policy_engine",
-                )
-
-            try:
-                reason = rule.reason.format(**action.parameters)
-            except (KeyError, ValueError):
-                reason = rule.reason
-            return AuthorizationResult(
-                decision=decision,
-                reason=reason,
-                action=action,
-                policy_rule_id=rule.id,
-                decision_source="policy_engine",
-            )
-
-        return None

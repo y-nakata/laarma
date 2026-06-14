@@ -10,27 +10,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 正典の所在
 
-**設計判断**（なぜこの設計か、どう実装すべきか）の正典は `docs/design/`:
+- **設計判断**（なぜこの設計か、どう実装すべきか） → `docs/design/` の各設計メモ。メモの一覧と要旨は [README.md の「設計メモ（docs/design/）」](README.md#設計メモdocsdesign) にある（ここには列挙しない。二重メンテを避けるため）。
+- **リポジトリの地図**（構成・層の分離・処理フロー・主要モジュールの責務） → [README.md](README.md)。
+- **セットアップ・使い方・各機能の詳細**（環境変数・PAP・監査ログ・権限スコープ・Embedding・ベンチマーク・DEFER ハンドリングなど） → [README.md の「詳しい使い方（docs/）」](README.md#詳しい使い方docs) からたどれる `docs/*.md`。
 
-| 設計メモ | 扱う設計判断 |
-|---------|------------|
-| [docs/design/policy-engine-proposal-override.md](docs/design/policy-engine-proposal-override.md) | PolicyEngine を R3・式(3) の π として完成させる提案/上書きモデル。DENY のみ terminal、それ以外は内部 IntentAlignment に確認し必要なら上書き。MODIFY の収束ループ、required_params、DEFER/STEP_UP の扱い |
-| [docs/design/identity-signing.md](docs/design/identity-signing.md) | IdentityContext の R6 非対称署名（個別署名＋包括署名、Ed25519、Human 鍵は検証のみ） |
-| [docs/design/risk-classification.md](docs/design/risk-classification.md) | リスク把握はデータ分類シグナル（δ）で行う。固定のツールリスク等級型は持たない |
-| [docs/design/laarma-testing-infrastructure.md](docs/design/laarma-testing-infrastructure.md) | テスト基盤の方針。回帰は benchmark.py、クラス・関数単体テストの導入判断 |
-
-**リポジトリの地図・セットアップ・使い方**の正典は README.md と `docs/`:
-
-- 構成・層の分離・処理フロー・主要モジュールの責務 → [README.md](README.md)
-- セットアップ手順・環境変数リファレンス → [docs/SETUP.md](docs/SETUP.md)
-- PAP（`policy.yaml`）の書き方 → [docs/POLICY.md](docs/POLICY.md)
-- 監査ログ・HMAC 署名鍵 → [docs/AUDIT.md](docs/AUDIT.md)
-- 権限スコープ（privilege_scope）と R9 → [docs/PRIVILEGE.md](docs/PRIVILEGE.md)
-- Embedding モデルの切り替え → [docs/EMBEDDING.md](docs/EMBEDDING.md)
-- ベンチマークの使い方 → [docs/BENCHMARK.md](docs/BENCHMARK.md)
-- AARMRuntime 単独使用時の DEFER ハンドリング → [docs/ADVANCED.md](docs/ADVANCED.md)
-
-**食い違ったときの原則**: 本ファイルの記述と上記の正典が食い違う場合は、**正典を優先**し、その相違を報告すること。本ファイルは要約・索引であり、方針転換の直後などに一時的に古くなっている可能性がある。
+**食い違ったときの原則**: 本ファイルの記述と上記の正典が食い違う場合は、**正典を優先**し、その相違を報告すること。本ファイルは案内・索引であり、方針転換の直後などに一時的に古くなっている可能性がある。
 
 ## Claude Code 固有の作業規約
 

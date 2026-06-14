@@ -118,7 +118,7 @@ class AuthorizationResult:
     decision_source:       str             = "intent_alignment"  # "policy_engine" | "denied_tools" | "privilege_scope" | "intent_alignment"
     # DEFER ワークフロー用フィールド
     deferral_reason:       str | None      = None
-    resolution_method:     str | None      = None  # "autonomous" | "step_up" | "human_approved" | None
+    resolution_method:     str | None      = None  # "autonomous" | "human_approved" | "human_denied" | None
     resolution_timestamp:  datetime | None = None
     # 提案/上書きモデル用フィールド — PolicyEngine の提案が IntentAlignment に上書きされた際に記録
     proposed_decision:     str | None      = None  # PolicyEngine が提案した decision 値

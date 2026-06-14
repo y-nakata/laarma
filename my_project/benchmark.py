@@ -39,12 +39,15 @@ _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
+from unittest.mock import patch
+
 from laarma import (
     AARMRuntime, Decision, EnvironmentContext, IdentityContext,
     MaintenanceWindow, Policy, load_policy,
 )
 from laarma.models import Action, AuthorizationResult
 from laarma.policy_engine import DEFAULT_POLICY
+from laarma.step_up_resolver import StepUpResolver
 
 
 class _AlwaysAllowStub:
@@ -206,6 +209,76 @@ def run_case(
     return result.decision, result.modified_params, elapsed, "run", result.reason, runtime.context_summary
 
 
+def run_step_up_unit_tests() -> int:
+    """
+    StepUpResolver の承認後動作をユニットレベルで検証する。
+    builtins.input をパッチして対話的入力を注入する。
+
+    Returns: 失敗ケース数（0 = 全 PASS）。
+    """
+    _dummy_action = Action(tool_name="write_file", parameters={"path": "/tmp/x", "content": "hi"})
+
+    cases = [
+        {
+            "id": "step_up_no_modified_params_approved",
+            "input": "y",
+            "modified_params": None,
+            "expected_decision": Decision.ALLOW,
+            "expected_resolution_method": "human_approved",
+            "expected_modified_params": None,
+        },
+        {
+            "id": "step_up_with_modified_params_approved",
+            "input": "y",
+            "modified_params": {"path": "safe.txt", "content": "hi"},
+            "expected_decision": Decision.MODIFY,
+            "expected_resolution_method": "human_approved",
+            "expected_modified_params": {"path": "safe.txt", "content": "hi"},
+        },
+        {
+            "id": "step_up_with_modified_params_denied",
+            "input": "n",
+            "modified_params": {"path": "safe.txt", "content": "hi"},
+            "expected_decision": Decision.DENY,
+            "expected_resolution_method": "human_denied",
+            "expected_modified_params": None,  # DENY では不問
+        },
+    ]
+
+    print("\n--- StepUpResolver unit tests ---")
+    fail_count = 0
+    for c in cases:
+        step_up_result = AuthorizationResult(
+            decision=Decision.STEP_UP,
+            reason="テスト用 STEP_UP",
+            action=_dummy_action,
+            modified_params=c["modified_params"],
+        )
+        with patch("builtins.input", return_value=c["input"]):
+            resolved = StepUpResolver().resolve(step_up_result)
+
+        ok = (
+            resolved.decision == c["expected_decision"]
+            and resolved.resolution_method == c["expected_resolution_method"]
+            and (
+                c["expected_modified_params"] is None
+                or resolved.modified_params == c["expected_modified_params"]
+            )
+        )
+        label = "✅" if ok else "❌"
+        print(f"{label} {c['id']}")
+        if not ok:
+            print(f"   decision:          expected={c['expected_decision'].value}  actual={resolved.decision.value}")
+            print(f"   resolution_method: expected={c['expected_resolution_method']}  actual={resolved.resolution_method}")
+            if c["expected_modified_params"] is not None:
+                print(f"   modified_params:   expected={c['expected_modified_params']}  actual={resolved.modified_params}")
+            fail_count += 1
+
+    total = len(cases)
+    print(f"{total - fail_count} passed, {fail_count} failed\n")
+    return fail_count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run AARM benchmark cases.")
     parser.add_argument("--data-file", default="benchmark_data.jsonl", help="Benchmark dataset JSONL file")
@@ -342,7 +415,9 @@ def main() -> int:
 
     if mode == "intent-alignment":
         print("\nNote: intent-alignment mode is exploratory; mismatches do not cause a nonzero exit status.")
-    return 1 if fail_count else 0
+
+    step_up_fail_count = run_step_up_unit_tests()
+    return 1 if (fail_count or step_up_fail_count) else 0
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ laarma/
 |------|------|---------|------|
 | R1 事前インターセプト | MUST | ✅ | `AARMToolProxy` が全ツール呼び出しを仲介 |
 | R2 コンテキスト蓄積 | MUST | ✅ | `ContextAccumulator` が Cn = Cn-1 ∪ {an, on, δn} を維持 |
-| R3 意図整合性評価 | MUST | ✅ | `PolicyEngine.evaluate()` が式(3)の π を単一関数として完全実装（提案/上書きモデル）。DENY のみ terminal、それ以外は内部の `IntentAlignment` が確認し必要なら上書き。設計方針は [docs/design/policy-engine-modify.md](docs/design/policy-engine-modify.md) |
+| R3 意図整合性評価 | MUST | ✅ | `PolicyEngine.evaluate()` が式(3)の π を単一関数として完全実装（提案/上書きモデル）。DENY のみ terminal、それ以外は内部の `IntentAlignment` が確認し必要なら上書き。設計方針は [docs/design/policy-engine-proposal-override.md](docs/design/policy-engine-proposal-override.md) |
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
 | R5 改ざん耐性レシート | MUST | ✅ | `AARM_HMAC_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
 | R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装。設計検討は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
@@ -130,8 +130,17 @@ laarma/
 | [docs/EMBEDDING.md](docs/EMBEDDING.md) | Embedding モデルの切り替えと比較 |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | ベンチマークの使い方 |
 | [docs/ADVANCED.md](docs/ADVANCED.md) | AARMRuntime 単独使用時の DEFER ハンドリング |
-| [docs/design/identity-signing.md](docs/design/identity-signing.md) | （設計メモ）アイデンティティ署名と R6 の扱い |
-| [docs/design/policy-engine-modify.md](docs/design/policy-engine-modify.md) | （設計メモ）PolicyEngine の MODIFY と IntentAlignment（R3）の関係 |
+
+### 設計メモ（docs/design/）
+
+確定した設計方針の正典。実装はこれらに従う。
+
+| ドキュメント | 内容 |
+|---|---|
+| [docs/design/policy-engine-proposal-override.md](docs/design/policy-engine-proposal-override.md) | PolicyEngine を R3・式(3) の π として完成させる提案/上書きモデル（DENY のみ terminal・収束ループ・DEFER/STEP_UP の扱い） |
+| [docs/design/identity-signing.md](docs/design/identity-signing.md) | アイデンティティ署名と R6 の扱い（非対称署名・個別署名/包括署名） |
+| [docs/design/risk-classification.md](docs/design/risk-classification.md) | リスク把握はデータ分類シグナル（δ）で行う（固定のツールリスク等級は持たない） |
+| [docs/design/laarma-testing-infrastructure.md](docs/design/laarma-testing-infrastructure.md) | テスト基盤の方針（回帰は benchmark.py・単体テストの導入判断） |
 
 ## ライセンス
 

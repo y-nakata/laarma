@@ -216,7 +216,10 @@ def run_step_up_unit_tests() -> int:
 
     Returns: 失敗ケース数（0 = 全 PASS）。
     """
-    _dummy_action = Action(tool_name="write_file", parameters={"path": "/tmp/x", "content": "hi"})
+    # nosec B108 — write_file は my_project のデモ用スタブ（tools.py）で、文字列を返すのみで
+    # ファイルを作らない。/tmp/x はそのスタブに渡るダミー引数のため B108（予測可能な temp
+    # ファイル名でのファイル生成）は該当しない。bandit は文字列リテラルのみを見て誤検知する。
+    _dummy_action = Action(tool_name="write_file", parameters={"path": "/tmp/x", "content": "hi"})  # nosec B108
 
     cases = [
         {

@@ -35,12 +35,24 @@ class StepUpResolver:
         print(f"[AARM] 🔔 STEP_UP: {step_up_result.reason}")
         print(f"[AARM]    ツール : {action.tool_name}")
         print(f"[AARM]    引数   : {action.parameters}")
+        if step_up_result.modified_params:
+            print(f"[AARM]    変換後 : {step_up_result.modified_params}")
         try:
             answer = input("[AARM] 承認しますか？ (y/N): ").strip().lower()
         except EOFError:
             answer = "n"
         approved = answer == "y"
 
+        if approved and step_up_result.modified_params:
+            # modified_params あり（MODIFY 提案が STEP_UP された）→ MODIFY + human_approved
+            return AuthorizationResult(
+                decision=Decision.MODIFY,
+                reason="承認者により承認されました。",
+                action=action,
+                modified_params=step_up_result.modified_params,
+                resolution_method="human_approved",
+                resolution_timestamp=datetime.now(timezone.utc),
+            )
         return AuthorizationResult(
             decision=Decision.ALLOW if approved else Decision.DENY,
             reason="承認者により承認されました。" if approved else "承認者により拒否されました。",

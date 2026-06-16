@@ -1,5 +1,5 @@
 """
-Policy Administration Point (PAP) — ポリシーファイル読み込み機構
+ポリシーファイル読み込み機構
 
 YAML または JSON のポリシーファイルを読み込み Policy オブジェクトを返す。
 ポリシーファイルは SDK 本体とは独立して管理でき、

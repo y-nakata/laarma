@@ -1,8 +1,8 @@
-# PAP（Policy Administration Point）
+# 静的ポリシー定義（policy.yaml）
 
 [← README に戻る](../README.md)
 
-静的ポリシーは `my_project/policies/policy.yaml` で定義します。PAP はポリシーの定義・管理を担うコンポーネントであり、SDK 本体（PDP）とは分離して置かれます。`load_policy()` でファイルを読み込み SDK に注入します。
+静的ポリシーは `my_project/policies/policy.yaml` で定義します。ポリシー定義は SDK 本体とは分離して置かれ、プロジェクト側（`my_project/policies/`）で管理します。`load_policy()` でファイルを読み込み SDK に注入します。
 
 ```python
 from laarma import AARMRuntime, load_policy

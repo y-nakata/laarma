@@ -32,7 +32,7 @@ laarma/
 │       ├── step_up_resolver.py    # STEP_UP 人間承認ワークフロー
 │       ├── environment.py         # 環境コンテキスト定義
 │       ├── policy_engine.py       # 静的ポリシー評価 (R3)
-│       ├── policy_loader.py       # PAP: YAML/JSON ポリシー読み込み
+│       ├── policy_loader.py       # 静的ポリシー定義の読み込み (YAML/JSON)
 │       ├── intent_alignment.py    # 動的意図整合性評価 (R3)
 │       ├── runtime.py             # R1〜R6 統合
 │       └── tool_proxy.py          # SDK Instrumentation 層
@@ -44,7 +44,7 @@ laarma/
     ├── benchmark.py     # ベンチマークランナー
     ├── benchmark_data.jsonl
     └── policies/
-        └── policy.yaml  # PAP — 静的ポリシー定義
+        └── policy.yaml  # 静的ポリシー定義
 ```
 
 ### 層の分離
@@ -55,7 +55,7 @@ laarma/
 | `my_project/agent.py` | 知らない | ツールを呼ぶだけ |
 | `my_project/tools.py` | 知らない | ツール定義・実装 |
 | `my_project/demo.py` | 知っている | laarma をセットアップしてエージェントに注入 |
-| `my_project/policies/policy.yaml` | — | PAP — 静的ポリシー定義（SDK 外で管理） |
+| `my_project/policies/policy.yaml` | — | 静的ポリシー定義（SDK 外で管理） |
 
 ## AARM 処理フロー
 
@@ -124,7 +124,7 @@ laarma/
 | ドキュメント | 内容 |
 |---|---|
 | [docs/SETUP.md](docs/SETUP.md) | セットアップ手順・環境変数リファレンス |
-| [docs/POLICY.md](docs/POLICY.md) | PAP（`policy.yaml`）の書き方 |
+| [docs/POLICY.md](docs/POLICY.md) | 静的ポリシー定義（`policy.yaml`）の書き方 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 監査ログの永続化・改ざんチェック・HMAC 署名鍵の設定 |
 | [docs/PRIVILEGE.md](docs/PRIVILEGE.md) | 権限スコープ（privilege_scope）の扱いと R9 |
 | [docs/EMBEDDING.md](docs/EMBEDDING.md) | Embedding モデルの切り替えと比較 |

@@ -1,4 +1,4 @@
-# laarma PAP — 静的ポリシー定義ファイル
+# laarma 静的ポリシー定義ファイル
 #
 # laarma_sdk の PolicyEngine に読み込まれ、静的ゲートとして機能する。
 # load_policy() でこのファイルを読み込み AARMRuntime に渡す。

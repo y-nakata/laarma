@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **設計判断**（なぜこの設計か、どう実装すべきか） → `docs/design/` の各設計メモ。メモの一覧と要旨は [README.md の「設計メモ（docs/design/）」](README.md#設計メモdocsdesign) にある（ここには列挙しない。二重メンテを避けるため）。
 - **リポジトリの地図**（構成・層の分離・処理フロー・主要モジュールの責務） → [README.md](README.md)。
-- **セットアップ・使い方・各機能の詳細**（環境変数・PAP・監査ログ・権限スコープ・Embedding・ベンチマーク・DEFER ハンドリングなど） → [README.md の「詳しい使い方（docs/）」](README.md#詳しい使い方docs) からたどれる `docs/*.md`。
+- **セットアップ・使い方・各機能の詳細**（環境変数・静的ポリシー定義・監査ログ・権限スコープ・Embedding・ベンチマーク・DEFER ハンドリングなど） → [README.md の「詳しい使い方（docs/）」](README.md#詳しい使い方docs) からたどれる `docs/*.md`。
 
 **食い違ったときの原則**: 本ファイルの記述と上記の正典が食い違う場合は、**正典を優先**し、その相違を報告すること。本ファイルは案内・索引であり、方針転換の直後などに一時的に古くなっている可能性がある。
 

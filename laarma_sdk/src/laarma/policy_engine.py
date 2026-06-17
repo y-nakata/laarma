@@ -4,7 +4,7 @@ AARM Policy Engine — R3 式(3) の π を完全実装（提案/上書きモデ
 PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す。
 IntentAlignment はその内部協力者（外部から注入される）。
 
-設計方針: docs/design/policy-engine-modify.md §6 参照。
+設計方針: docs/design/policy-engine-proposal-override.md §6 参照。
 
   - decision == DENY  → terminal（IntentAlignment 不要。常に安全側）
   - それ以外（ALLOW / MODIFY / DEFER / STEP_UP、またはルールなし → 暗黙 ALLOW）

@@ -141,6 +141,7 @@ laarma/
 | [docs/design/identity-signing.md](docs/design/identity-signing.md) | アイデンティティ署名と R6 の扱い（非対称署名・個別署名/包括署名） |
 | [docs/design/risk-classification.md](docs/design/risk-classification.md) | リスク把握はデータ分類シグナル（δ）で行う（固定のツールリスク等級は持たない） |
 | [docs/design/laarma-testing-infrastructure.md](docs/design/laarma-testing-infrastructure.md) | テスト基盤の方針（回帰は benchmark.py・単体テストの導入判断） |
+| [docs/design/terminology-discipline.md](docs/design/terminology-discipline.md) | 用語規律（認可＝XACML の PDP/PEP/PAP を使わない・AARM 仕様語彙に揃える） |
 
 ## ライセンス
 

@@ -31,7 +31,7 @@ laarma/
 │       ├── deferral.py            # DEFER ワークフロー解決
 │       ├── step_up_resolver.py    # STEP_UP 人間承認ワークフロー
 │       ├── environment.py         # 環境コンテキスト定義
-│       ├── policy_engine.py       # 静的ポリシー評価 (R3)
+│       ├── policy_engine.py       # ポリシー評価 (R3) — 式(3) の π・提案/上書きモデル
 │       ├── policy_loader.py       # 静的ポリシー定義の読み込み (YAML/JSON)
 │       ├── intent_alignment.py    # 動的意図整合性評価 (R3)
 │       ├── runtime.py             # R1〜R6 統合

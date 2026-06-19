@@ -26,7 +26,17 @@ class Decision(str, Enum):
 
 @dataclass
 class IdentityContext:
-    """R6: アクションを実行するアイデンティティの多層表現。"""
+    """
+    R6: アクションを実行するアイデンティティの多層表現。
+
+    現在の ``identity_token`` は、4層（human_principal / service_identity /
+    session_id / privilege_scope）全体を ``AARM_HMAC_SECRET``（システム共有鍵）で
+    一括計算した HMAC-SHA256 による **attestation（システム証明）** である。
+
+    HMAC は対称鍵であるため署名者と検証者が同じ鍵を共有し、「alice が依頼した」という
+    non-repudiation（否認防止）は成立しない（R6 MUST 要件を満たさない）。
+    解消は Issue #55 後続ステップ（PR-2 以降で ``sign`` の中身を Ed25519 に置き換える）で行う。
+    """
     human_principal:  str
     service_identity: str
     session_id:       str
@@ -34,6 +44,8 @@ class IdentityContext:
     identity_token:   str | None = field(default=None)
 
     def _compute_token(self, secret: str) -> str:
+        # 4層を 1 つの HMAC-SHA256 で一括計算するシステム attestation。
+        # 各主体（human / agent）による個別署名ではない（Issue #55 参照）。
         payload = json.dumps(
             {
                 "human_principal":  self.human_principal,
@@ -46,11 +58,23 @@ class IdentityContext:
         return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
 
     def sign(self, secret: str) -> "IdentityContext":
-        """HMAC で署名した新しい IdentityContext を返す（元インスタンスは変更しない）。"""
+        """
+        identity_token を付与した新しい IdentityContext を返す（元インスタンスは変更しない）。
+
+        メソッド名 ``sign`` は「主体が署名する」を示唆するが、現実装は
+        ``AARM_HMAC_SECRET`` を持つ **システム（サービス）が全体に付与する attestation** である。
+        引数 ``secret`` はシステムの共有鍵（``AARM_HMAC_SECRET``）であり、
+        human_principal（alice 等）の秘密鍵ではない。
+        """
         return replace(self, identity_token=self._compute_token(secret))
 
     def verify(self, secret: str) -> bool:
-        """identity_token が正しい HMAC か検証する。"""
+        """
+        identity_token がシステム attestation として正しい HMAC か検証する。
+
+        同じシステム共有鍵（``secret``）で HMAC を再計算し一致を確認する。
+        「誰が署名したか」を区別する non-repudiation 検証ではない。
+        """
         if self.identity_token is None:
             return False
         return hmac.compare_digest(self.identity_token, self._compute_token(secret))

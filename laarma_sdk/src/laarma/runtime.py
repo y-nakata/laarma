@@ -51,9 +51,10 @@ class AARMRuntime:
             intent_alignment=ia,
         )
         self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
+        self._receipt_secret = os.getenv("AARM_RECEIPT_SECRET")
         # R6 MUST: identity の cryptographic binding 検証
-        _hmac_secret = os.getenv("AARM_HMAC_SECRET")
-        if _hmac_secret and identity is not None and not identity.verify(_hmac_secret):
+        _identity_secret = os.getenv("AARM_IDENTITY_SECRET")
+        if _identity_secret and identity is not None and not identity.verify(_identity_secret):
             warnings.warn(
                 "IdentityContext の identity_token が未設定または不正です。"
                 "identity.sign(secret) で署名してから渡してください。",
@@ -95,28 +96,31 @@ class AARMRuntime:
             self._accumulator.summary(),
             self._environment,
         )
-        self._accumulator.record_result(result)
         # DEFER を含む全判断をここで一元ログする。
         # tool_proxy.py 側で DEFER を別途 print しないこと（二重ログになる）。
-        self._log(result)
-        return result
+        return self._finalize(result)
 
     def record_tool_output(self, action_id: str, output: Any) -> None:
         self._accumulator.record_tool_output(action_id, output)
 
     def record_deferred_resolution(self, resolved: AuthorizationResult) -> None:
         """認可結果に追記する (DEFER 解決後)。"""
-        self._accumulator.record_result(resolved)
         # DEFER 解決後の最終判断（ALLOW / DENY / STEP_UP）のみをログする。
         # DEFER 自体は intercept() が既にログ済み。
-        self._log(resolved)
+        self._finalize(resolved)
 
     def record_step_up_resolution(self, resolved: AuthorizationResult) -> None:
         """認可結果に追記する (STEP_UP 人間承認後)。"""
-        self._accumulator.record_result(resolved)
         # STEP_UP 自体は intercept() が既にログ済み。
         # ここでは人間承認後の最終判断（ALLOW / DENY）のみをログする。
-        self._log(resolved)
+        self._finalize(resolved)
+
+    def _finalize(self, result: AuthorizationResult) -> AuthorizationResult:
+        """receipt_hash を封緘してから記録・ログする単一経路。鍵を知るのはここだけ。"""
+        result.seal(self._receipt_secret)
+        self._accumulator.record_result(result)
+        self._log(result)
+        return result
 
     @property
     def session_id(self) -> str:                          return self._accumulator.context.session_id

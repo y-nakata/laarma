@@ -86,7 +86,7 @@ laarma/
 | R2 コンテキスト蓄積 | MUST | ✅ | `ContextAccumulator` が Cn = Cn-1 ∪ {an, on, δn} を維持 |
 | R3 意図整合性評価 | MUST | ✅ | `PolicyEngine.evaluate()` が式(3)の π を単一関数として完全実装（提案/上書きモデル）。DENY のみ terminal、それ以外は内部の `IntentAlignment` が確認し必要なら上書き。設計方針は [docs/design/policy-engine-proposal-override.md](docs/design/policy-engine-proposal-override.md) |
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
-| R5 改ざん耐性レシート | MUST | ✅ | `AARM_HMAC_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
+| R5 改ざん耐性レシート | MUST | ✅ | `AARM_RECEIPT_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
 | R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装。設計検討は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
 | R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` に `recent_avg`・`drift_trend`・`scope_expansion_recent` を追加 |
 | R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |

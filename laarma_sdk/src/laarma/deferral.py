@@ -172,6 +172,12 @@ class DeferralResolver:
             reason=reason,
             action=action,
             deferral_reason=deferred_result.reason,
+            # resolution_method は「この DEFER をどう解決したか」の記録。
+            # DEFER を自律解決できれば "autonomous"、解決できず STEP_UP に格上げしたら "step_up"。
+            # "step_up" の場合、この後 StepUpResolver が人間承認を処理し human_approved/human_denied の
+            # 行が別途 audit log に積まれる（record_deferred_resolution と record_step_up_resolution が
+            # それぞれ _log する）。そのため "step_up" は後続行から見ると中間状態に見えるが、この行自体は
+            # 「DEFER を STEP_UP に解決した」というその時点の解決手段を正しく記録しており、矛盾はない。
             resolution_method="autonomous" if decision != Decision.STEP_UP else "step_up",
             resolution_timestamp=now,
         )

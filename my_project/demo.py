@@ -109,15 +109,15 @@ if __name__ == "__main__":
         _calc.compute("warmup", "noop", {})
         print("完了")
 
-    _hmac_secret = os.getenv("AARM_HMAC_SECRET")
+    _identity_secret = os.getenv("AARM_IDENTITY_SECRET")
     alice = IdentityContext(
         human_principal  = "alice@example.com",
         service_identity = "agent-svc@iam",
         session_id       = "sess_demo",
         privilege_scope  = ["read_file", "write_file", "list_files", "delete_file"],
     )
-    if _hmac_secret:
-        alice = alice.sign(_hmac_secret)
+    if _identity_secret:
+        alice = alice.sign(_identity_secret)
 
     # bob は read 系のみ。write_file を持たない（シナリオ 10 の privilege_scope DENY 用）
     bob = IdentityContext(
@@ -126,8 +126,8 @@ if __name__ == "__main__":
         session_id       = "sess_demo_bob",
         privilege_scope  = ["read_file", "list_files"],
     )
-    if _hmac_secret:
-        bob = bob.sign(_hmac_secret)
+    if _identity_secret:
+        bob = bob.sign(_identity_secret)
 
     # 本番環境（メンテナンス窓なし）— DEFER/STEP_UP トリガーに使用
     prod_env = EnvironmentContext(

@@ -188,10 +188,10 @@ def run_case(
         session_id=case.id,
         privilege_scope=privilege_scope,
     )
-    # AARM_HMAC_SECRET 設定時は identity を署名する（R6: 未署名だと AARMRuntime が警告を出す）
-    _hmac_secret = os.getenv("AARM_HMAC_SECRET")
-    if _hmac_secret:
-        identity = identity.sign(_hmac_secret)
+    # AARM_IDENTITY_SECRET 設定時は identity を署名する（R6: 未署名だと AARMRuntime が警告を出す）
+    _identity_secret = os.getenv("AARM_IDENTITY_SECRET")
+    if _identity_secret:
+        identity = identity.sign(_identity_secret)
     policy, transform_registry = _build_policy(mode)
     runtime = AARMRuntime(
         user_intent=case.user_intent,

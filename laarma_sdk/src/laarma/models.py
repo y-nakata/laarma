@@ -7,13 +7,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import uuid
 import warnings
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+from .audit import compute_receipt_hash
 
 
 class Decision(str, Enum):
@@ -30,7 +31,7 @@ class IdentityContext:
     R6: アクションを実行するアイデンティティの多層表現。
 
     現在の ``identity_token`` は、4層（human_principal / service_identity /
-    session_id / privilege_scope）全体を ``AARM_HMAC_SECRET``（システム共有鍵）で
+    session_id / privilege_scope）全体を ``AARM_IDENTITY_SECRET``（システム共有鍵）で
     一括計算した HMAC-SHA256 による **attestation（システム証明）** である。
 
     HMAC は対称鍵であるため署名者と検証者が同じ鍵を共有し、「alice が依頼した」という
@@ -62,8 +63,8 @@ class IdentityContext:
         identity_token を付与した新しい IdentityContext を返す（元インスタンスは変更しない）。
 
         メソッド名 ``sign`` は「主体が署名する」を示唆するが、現実装は
-        ``AARM_HMAC_SECRET`` を持つ **システム（サービス）が全体に付与する attestation** である。
-        引数 ``secret`` はシステムの共有鍵（``AARM_HMAC_SECRET``）であり、
+        ``AARM_IDENTITY_SECRET`` を持つ **システム（サービス）が全体に付与する attestation** である。
+        引数 ``secret`` はシステムの共有鍵（``AARM_IDENTITY_SECRET``）であり、
         human_principal（alice 等）の秘密鍵ではない。
         """
         return replace(self, identity_token=self._compute_token(secret))
@@ -146,41 +147,56 @@ class AuthorizationResult:
     resolution_timestamp:  datetime | None = None
     # 提案/上書きモデル用フィールド — PolicyEngine の提案が IntentAlignment に上書きされた際に記録
     proposed_decision:     str | None      = None  # PolicyEngine が提案した decision 値
-    receipt_hash:          str             = field(init=False)
+    _receipt_hash:         str | None      = field(default=None, init=False, repr=False)
+    _sealed:                bool           = field(default=False, init=False, repr=False)
 
-    def __post_init__(self) -> None:
-        self.receipt_hash = self._compute_hash()
+    @property
+    def receipt_hash(self) -> str:
+        if not self._sealed:
+            raise RuntimeError(
+                "AuthorizationResult is not sealed yet. Call seal(secret) before "
+                "reading receipt_hash."
+            )
+        return self._receipt_hash
 
-    def _compute_hash(self) -> str:
-        payload = json.dumps(
-            {
-                "receipt_id":         self.receipt_id,
-                "action":             self.action.to_dict(),
-                "decision":           self.decision.value,
-                "reason":             self.reason,
-                "modified_params":    self.modified_params,
-                "decision_source":    self.decision_source,
-                "policy_rule_id":     self.policy_rule_id,
-                "deferral_reason":    self.deferral_reason,
-                "proposed_decision":  self.proposed_decision,
-                "resolution_method":  self.resolution_method,
-                "resolution_timestamp": (
-                    self.resolution_timestamp.isoformat()
-                    if self.resolution_timestamp else None
-                ),
-            },
-            sort_keys=True, ensure_ascii=False,
-        ).encode()
-        secret = os.getenv("AARM_HMAC_SECRET")
-        if secret:
-            return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-        warnings.warn(
-            "AARM_HMAC_SECRET が未設定です。receipt_hash は改ざん検知に使用できません。",
-            stacklevel=3,
-        )
-        return hashlib.sha256(payload).hexdigest()
+    def seal(self, secret: str | None) -> None:
+        """
+        receipt_hash を計算して確定する。鍵を知るのは呼び出し側（runtime）だけに
+        閉じる。判断層（policy_engine / deferral / step_up_resolver）は鍵を知らずに
+        AuthorizationResult を生成し、runtime が結果を受け取った直後に封緘する。
+        """
+        if self._sealed:
+            raise RuntimeError("AuthorizationResult is already sealed.")
+        payload_fields = {
+            "receipt_id":         self.receipt_id,
+            "action":             self.action.to_dict(),
+            "decision":           self.decision.value,
+            "reason":             self.reason,
+            "modified_params":    self.modified_params,
+            "decision_source":    self.decision_source,
+            "policy_rule_id":     self.policy_rule_id,
+            "deferral_reason":    self.deferral_reason,
+            "proposed_decision":  self.proposed_decision,
+            "resolution_method":  self.resolution_method,
+            "resolution_timestamp": (
+                self.resolution_timestamp.isoformat()
+                if self.resolution_timestamp else None
+            ),
+        }
+        if not secret:
+            warnings.warn(
+                "AARM_RECEIPT_SECRET が未設定です。receipt_hash は改ざん検知に使用できません。",
+                stacklevel=3,
+            )
+        self._receipt_hash = compute_receipt_hash(payload_fields, secret)
+        self._sealed = True
 
     def to_dict(self) -> dict:
+        if not self._sealed:
+            raise RuntimeError(
+                "AuthorizationResult is not sealed yet. Call seal(secret) before "
+                "calling to_dict()."
+            )
         d = {
             "receipt_id":           self.receipt_id,
             "receipt_hash":         self.receipt_hash,

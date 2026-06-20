@@ -1,14 +1,15 @@
-#!/usr/bin/env python3
 """
-AARM 監査ログ（JSONL）の receipt_hash 検証スクリプト。
+AARM 監査ログ（JSONL）の receipt_hash 計算・検証。
+
+正規化＋ハッシュ計算は compute_receipt_hash() に一元化されている。
+ここに正規化ロジックを再実装しないこと（過去に check_audit_log.py が本体の
+ロジックを写経し、本体側の変更に追従できずズレて壊れた実績がある）。
 
 使い方:
-    python my_project/check_audit_log.py aarm_audit.jsonl
-
-AARM_HMAC_SECRET が設定されている場合は HMAC-SHA256 で検証する。
-未設定時は鍵なし SHA-256 で検証する（生成時と一致させること）。
-鍵あり行と鍵なし行が混在するログは --allow-mixed で両方試みる。
+    python -m laarma.audit aarm_audit.jsonl
 """
+
+from __future__ import annotations
 
 import argparse
 import hashlib
@@ -18,29 +19,30 @@ import os
 import sys
 
 
-def _compute_hash(entry: dict, secret: str | None) -> str:
-    payload = json.dumps(
-        {
-            "receipt_id":          entry["receipt_id"],
-            "action":              entry["action"],
-            "decision":            entry["decision"],
-            "reason":              entry["reason"],
-            "modified_params":     entry.get("modified_params"),
-            "decision_source":     entry.get("decision_source", "intent_alignment"),
-            "policy_rule_id":      entry.get("policy_rule_id"),
-            "deferral_reason":     entry.get("deferral_reason"),
-            "proposed_decision":   entry.get("proposed_decision"),
-            "resolution_method":   entry.get("resolution_method"),
-            "resolution_timestamp": entry.get("resolution_timestamp"),
-        },
-        sort_keys=True, ensure_ascii=False,
-    ).encode()
+def compute_receipt_hash(fields: dict, secret: str | None) -> str:
+    payload = json.dumps(fields, sort_keys=True, ensure_ascii=False).encode()
     if secret:
         return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
     return hashlib.sha256(payload).hexdigest()
 
 
-def check(path: str, secret: str | None, allow_mixed: bool = False) -> bool:
+def _fields_from_entry(entry: dict) -> dict:
+    return {
+        "receipt_id":          entry["receipt_id"],
+        "action":              entry["action"],
+        "decision":            entry["decision"],
+        "reason":              entry["reason"],
+        "modified_params":     entry.get("modified_params"),
+        "decision_source":     entry.get("decision_source", "intent_alignment"),
+        "policy_rule_id":      entry.get("policy_rule_id"),
+        "deferral_reason":     entry.get("deferral_reason"),
+        "proposed_decision":   entry.get("proposed_decision"),
+        "resolution_method":   entry.get("resolution_method"),
+        "resolution_timestamp": entry.get("resolution_timestamp"),
+    }
+
+
+def verify_audit_log(path: str, secret: str | None, allow_mixed: bool = False) -> bool:
     ok = 0
     fail = 0
 
@@ -56,14 +58,14 @@ def check(path: str, secret: str | None, allow_mixed: bool = False) -> bool:
                 continue
 
             stored   = entry.get("receipt_hash", "")
-            computed = _compute_hash(entry, secret)
+            computed = compute_receipt_hash(_fields_from_entry(entry), secret)
             rid      = entry.get("receipt_id", "")[:8]
             decision = entry.get("decision", "")
 
             matched = (stored == computed)
             # 混在ログ対応: HMAC で不一致なら鍵なし SHA-256 でも試みる
             if not matched and allow_mixed and secret:
-                matched = (stored == _compute_hash(entry, None))
+                matched = (stored == compute_receipt_hash(_fields_from_entry(entry), None))
 
             if matched:
                 print(f"[OK]   Line {lineno}: receipt_id={rid}... decision={decision}")
@@ -94,15 +96,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    secret = os.getenv("AARM_HMAC_SECRET")
+    secret = os.getenv("AARM_RECEIPT_SECRET")
     if secret:
-        print(f"検証モード: HMAC-SHA256 (AARM_HMAC_SECRET 設定済み)")
+        print("検証モード: HMAC-SHA256 (AARM_RECEIPT_SECRET 設定済み)")
     else:
-        print(f"検証モード: SHA-256 (AARM_HMAC_SECRET 未設定)")
+        print("検証モード: SHA-256 (AARM_RECEIPT_SECRET 未設定)")
 
-    sys.exit(0 if check(args.log_file, secret=secret, allow_mixed=args.allow_mixed) else 1)
+    sys.exit(0 if verify_audit_log(args.log_file, secret=secret, allow_mixed=args.allow_mixed) else 1)
 
 
 if __name__ == "__main__":
     main()
-

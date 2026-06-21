@@ -4,8 +4,6 @@ AARM データモデルとコア定数 — 仕様 IV-A2, IV-A3
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import uuid
 import warnings
@@ -13,6 +11,12 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 from .audit import compute_receipt_hash
 
@@ -30,65 +34,107 @@ class IdentityContext:
     """
     R6: アクションを実行するアイデンティティの多層表現。
 
-    現在の ``identity_token`` は、4層（human_principal / service_identity /
-    session_id / privilege_scope）全体を ``AARM_IDENTITY_SECRET``（システム共有鍵）で
-    一括計算した HMAC-SHA256 による **attestation（システム証明）** である。
+    委任の連鎖における3つの主体（依頼者 Human / 実行者 Agent / 調停者 Service）が、
+    それぞれ自分の Ed25519 秘密鍵で署名する。Human と Agent は自分の層を個別署名し、
+    Service は human_principal / agent_identity / service_identity / privilege_scope /
+    session_id を束ねた包括署名で「これらが一つのアクションのために結合された」ことを保証する
+    （Service 自身の個別署名は包括署名に内包されるため別途持たない）。
 
-    HMAC は対称鍵であるため署名者と検証者が同じ鍵を共有し、「alice が依頼した」という
-    non-repudiation（否認防止）は成立しない（R6 MUST 要件を満たさない）。
-    解消は Issue #55 後続ステップ（PR-2 以降で ``sign`` の中身を Ed25519 に置き換える）で行う。
+    laarma SDK は秘密鍵を生成・保管しない（検証者であって発行者ではない）。署名は鍵を持つ
+    呼び出し側（``sign_human`` / ``sign_agent`` / ``sign_service``）が行い、SDK は対応する
+    公開鍵での検証（``verify_human`` / ``verify_agent`` / ``verify_service``）のみを提供する。
+
+    設計の詳細は docs/design/identity-signing.md §3〜§4 を参照。
     """
-    human_principal:  str
-    service_identity: str
-    session_id:       str
-    privilege_scope:  list[str] = field(default_factory=list)
-    identity_token:   str | None = field(default=None)
+    human_principal:   str
+    agent_identity:    str
+    service_identity:  str
+    session_id:        str
+    privilege_scope:   list[str] = field(default_factory=list)
+    human_signature:   str | None = field(default=None)
+    agent_signature:   str | None = field(default=None)
+    service_signature: str | None = field(default=None)
 
-    def _compute_token(self, secret: str) -> str:
-        # 4層を 1 つの HMAC-SHA256 で一括計算するシステム attestation。
-        # 各主体（human / agent）による個別署名ではない（Issue #55 参照）。
-        payload = json.dumps(
+    def _human_payload(self) -> bytes:
+        return json.dumps(
+            {"human_principal": self.human_principal, "session_id": self.session_id},
+            sort_keys=True, ensure_ascii=False,
+        ).encode()
+
+    def _agent_payload(self) -> bytes:
+        return json.dumps(
+            {"agent_identity": self.agent_identity, "session_id": self.session_id},
+            sort_keys=True, ensure_ascii=False,
+        ).encode()
+
+    def _service_payload(self) -> bytes:
+        # 包括署名: 個別署名の対象に service_identity と privilege_scope を加えて束ねる。
+        # action_id は含めない（「どの主体が」は identity 署名、「どのアクションを」は
+        # receipt の封緘が担保する別レイヤー。docs/design/identity-signing.md §3）。
+        return json.dumps(
             {
                 "human_principal":  self.human_principal,
+                "agent_identity":   self.agent_identity,
                 "service_identity": self.service_identity,
-                "session_id":       self.session_id,
                 "privilege_scope":  sorted(self.privilege_scope),
+                "session_id":       self.session_id,
             },
             sort_keys=True, ensure_ascii=False,
         ).encode()
-        return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
 
-    def sign(self, secret: str) -> "IdentityContext":
-        """
-        identity_token を付与した新しい IdentityContext を返す（元インスタンスは変更しない）。
+    def sign_human(self, private_key: Ed25519PrivateKey) -> "IdentityContext":
+        """human_principal の秘密鍵で個別署名した新しい IdentityContext を返す。"""
+        return replace(self, human_signature=private_key.sign(self._human_payload()).hex())
 
-        メソッド名 ``sign`` は「主体が署名する」を示唆するが、現実装は
-        ``AARM_IDENTITY_SECRET`` を持つ **システム（サービス）が全体に付与する attestation** である。
-        引数 ``secret`` はシステムの共有鍵（``AARM_IDENTITY_SECRET``）であり、
-        human_principal（alice 等）の秘密鍵ではない。
-        """
-        return replace(self, identity_token=self._compute_token(secret))
+    def sign_agent(self, private_key: Ed25519PrivateKey) -> "IdentityContext":
+        """agent_identity の秘密鍵で個別署名した新しい IdentityContext を返す。"""
+        return replace(self, agent_signature=private_key.sign(self._agent_payload()).hex())
 
-    def verify(self, secret: str) -> bool:
-        """
-        identity_token がシステム attestation として正しい HMAC か検証する。
+    def sign_service(self, private_key: Ed25519PrivateKey) -> "IdentityContext":
+        """service_identity の秘密鍵で包括署名した新しい IdentityContext を返す。"""
+        return replace(self, service_signature=private_key.sign(self._service_payload()).hex())
 
-        同じシステム共有鍵（``secret``）で HMAC を再計算し一致を確認する。
-        「誰が署名したか」を区別する non-repudiation 検証ではない。
-        """
-        if self.identity_token is None:
+    def verify_human(self, public_key: Ed25519PublicKey) -> bool:
+        if self.human_signature is None:
             return False
-        return hmac.compare_digest(self.identity_token, self._compute_token(secret))
+        try:
+            public_key.verify(bytes.fromhex(self.human_signature), self._human_payload())
+            return True
+        except InvalidSignature:
+            return False
+
+    def verify_agent(self, public_key: Ed25519PublicKey) -> bool:
+        if self.agent_signature is None:
+            return False
+        try:
+            public_key.verify(bytes.fromhex(self.agent_signature), self._agent_payload())
+            return True
+        except InvalidSignature:
+            return False
+
+    def verify_service(self, public_key: Ed25519PublicKey) -> bool:
+        if self.service_signature is None:
+            return False
+        try:
+            public_key.verify(bytes.fromhex(self.service_signature), self._service_payload())
+            return True
+        except InvalidSignature:
+            return False
 
     def to_dict(self) -> dict:
         d = {
             "human_principal":  self.human_principal,
+            "agent_identity":   self.agent_identity,
             "service_identity": self.service_identity,
             "session_id":       self.session_id,
             "privilege_scope":  self.privilege_scope,
         }
-        if self.identity_token:
-            d["identity_token"] = self.identity_token
+        if self.human_signature:
+            d["human_signature"] = self.human_signature
+        if self.agent_signature:
+            d["agent_signature"] = self.agent_signature
+        if self.service_signature:
+            d["service_signature"] = self.service_signature
         return d
 
 

@@ -23,6 +23,7 @@ from laarma import (
     load_policy, Policy,
 )
 from my_project.agent import run as agent_run
+from my_project.identity_keys import load_or_create_keypair
 from my_project.tools import IMPLS
 
 # path 変換のドメイン知識。YAML の modify_transform が参照する変換名を定義する。
@@ -109,25 +110,35 @@ if __name__ == "__main__":
         _calc.compute("warmup", "noop", {})
         print("完了")
 
-    _identity_secret = os.getenv("AARM_IDENTITY_SECRET")
+    # R6: Human(依頼者)/Agent(実行者)/Service(調停者) の3主体それぞれの鍵で署名する。
+    # agent_identity は service_identity（IAM サービスアカウント風の見た目）と紛らわしくならないよう、
+    # 「具体的なエージェントインスタンス」であることが読み取れる instance id 風の値にする。
+    _keys_dir = Path(__file__).parent.parent / "keys"
+    os.environ["AARM_IDENTITY_PUBKEY_DIR"] = str(_keys_dir)
+
+    _alice_key   = load_or_create_keypair(_keys_dir, "alice@example.com")
+    _bob_key     = load_or_create_keypair(_keys_dir, "bob@example.com")
+    _agent_key   = load_or_create_keypair(_keys_dir, "fs-agent-instance-01")
+    _service_key = load_or_create_keypair(_keys_dir, "agent-svc@iam")
+
     alice = IdentityContext(
         human_principal  = "alice@example.com",
+        agent_identity   = "fs-agent-instance-01",
         service_identity = "agent-svc@iam",
         session_id       = "sess_demo",
         privilege_scope  = ["read_file", "write_file", "list_files", "delete_file"],
     )
-    if _identity_secret:
-        alice = alice.sign(_identity_secret)
+    alice = alice.sign_human(_alice_key).sign_agent(_agent_key).sign_service(_service_key)
 
     # bob は read 系のみ。write_file を持たない（シナリオ 10 の privilege_scope DENY 用）
     bob = IdentityContext(
         human_principal  = "bob@example.com",
+        agent_identity   = "fs-agent-instance-01",
         service_identity = "agent-svc@iam",
         session_id       = "sess_demo_bob",
         privilege_scope  = ["read_file", "list_files"],
     )
-    if _identity_secret:
-        bob = bob.sign(_identity_secret)
+    bob = bob.sign_human(_bob_key).sign_agent(_agent_key).sign_service(_service_key)
 
     # 本番環境（メンテナンス窓なし）— DEFER/STEP_UP トリガーに使用
     prod_env = EnvironmentContext(

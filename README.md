@@ -43,6 +43,7 @@ laarma/
     ├── demo.py          # デモエントリーポイント
     ├── benchmark.py     # ベンチマークランナー
     ├── benchmark_data.jsonl
+    ├── identity_keys.py # R6: Human/Agent/Service の Ed25519 鍵生成・読み込み（デモ用・第1段階）
     └── policies/
         └── policy.yaml  # 静的ポリシー定義
 ```
@@ -87,7 +88,7 @@ laarma/
 | R3 意図整合性評価 | MUST | ✅ | `PolicyEngine.evaluate()` が式(3)の π を単一関数として完全実装（提案/上書きモデル）。DENY のみ terminal、それ以外は内部の `IntentAlignment` が確認し必要なら上書き。設計方針は [docs/design/policy-engine-proposal-override.md](docs/design/policy-engine-proposal-override.md) |
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
 | R5 改ざん耐性レシート | MUST | ✅ | `AARM_RECEIPT_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
-| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext.sign()/verify()` で HMAC バインディング実装。非対称署名（non-repudiation）は未実装。設計検討は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
+| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext` が Human/Agent/Service 各主体の Ed25519 鍵で署名（個別署名 + Service の包括署名）。非対称署名・主体分離は実装済みだが、freshness/revocation 検証と identity 欠如時の deny/flag は未実装。設計は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
 | R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` に `recent_avg`・`drift_trend`・`scope_expansion_recent` を追加 |
 | R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
 | R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価。詳細は [docs/PRIVILEGE.md](docs/PRIVILEGE.md) |

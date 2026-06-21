@@ -7,13 +7,28 @@ from __future__ import annotations
 
 import os
 import warnings
+from pathlib import Path
 from typing import Any
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 from .context_accumulator import ContextAccumulator
 from .environment import EnvironmentContext
 from .intent_alignment import IntentAlignment
 from .models import Action, AuthorizationResult, Decision, IdentityContext
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
+
+
+def _load_ed25519_pubkey(pubkey_dir: str, principal: str) -> Ed25519PublicKey | None:
+    """``pubkey_dir/{principal}.pub`` があれば読み込んで返す。無ければ None。"""
+    path = Path(pubkey_dir) / f"{principal}.pub"
+    if not path.is_file():
+        return None
+    key = load_pem_public_key(path.read_bytes())
+    if not isinstance(key, Ed25519PublicKey):
+        raise ValueError(f"{path} は Ed25519 公開鍵ではありません。")
+    return key
 
 
 class AARMRuntime:
@@ -52,14 +67,27 @@ class AARMRuntime:
         )
         self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
         self._receipt_secret = os.getenv("AARM_RECEIPT_SECRET")
-        # R6 MUST: identity の cryptographic binding 検証
-        _identity_secret = os.getenv("AARM_IDENTITY_SECRET")
-        if _identity_secret and identity is not None and not identity.verify(_identity_secret):
-            warnings.warn(
-                "IdentityContext の identity_token が未設定または不正です。"
-                "identity.sign(secret) で署名してから渡してください。",
-                stacklevel=2,
-            )
+        # R6 MUST: identity の cryptographic binding 検証（Human/Agent 個別署名 + Service 包括署名）
+        _pubkey_dir = os.getenv("AARM_IDENTITY_PUBKEY_DIR")
+        if _pubkey_dir and identity is not None:
+            for label, principal, verify in (
+                ("human",   identity.human_principal,  identity.verify_human),
+                ("agent",   identity.agent_identity,    identity.verify_agent),
+                ("service", identity.service_identity,  identity.verify_service),
+            ):
+                pubkey = _load_ed25519_pubkey(_pubkey_dir, principal)
+                if pubkey is None:
+                    warnings.warn(
+                        f"IdentityContext の {label} 公開鍵が {_pubkey_dir} に見つかりません"
+                        f"（{principal}.pub）。署名検証をスキップします。",
+                        stacklevel=2,
+                    )
+                elif not verify(pubkey):
+                    warnings.warn(
+                        f"IdentityContext の {label}_signature が未設定または不正です。"
+                        f"identity.sign_{label}(private_key) で署名してから渡してください。",
+                        stacklevel=2,
+                    )
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """

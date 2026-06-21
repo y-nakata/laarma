@@ -48,6 +48,15 @@ from laarma import (
 from laarma.models import Action, AuthorizationResult
 from laarma.policy_engine import DEFAULT_POLICY
 from laarma.step_up_resolver import StepUpResolver
+from my_project.identity_keys import load_or_create_keypair
+
+# R6: Human/Agent/Service の3鍵で署名する（demo.py と同じ自己生成鍵の方式）。
+# agent_identity は service_identity と紛らわしくならないよう instance id 風の値にする。
+_KEYS_DIR = Path(__file__).resolve().parent.parent / "keys"
+os.environ.setdefault("AARM_IDENTITY_PUBKEY_DIR", str(_KEYS_DIR))
+_BENCHMARK_HUMAN_KEY   = load_or_create_keypair(_KEYS_DIR, "benchmark@local")
+_BENCHMARK_AGENT_KEY   = load_or_create_keypair(_KEYS_DIR, "benchmark-agent-instance")
+_BENCHMARK_SERVICE_KEY = load_or_create_keypair(_KEYS_DIR, "benchmark-runner")
 
 
 class _AlwaysAllowStub:
@@ -184,14 +193,18 @@ def run_case(
         privilege_scope = [case.action["tool_name"]]
     identity = IdentityContext(
         human_principal="benchmark@local",
+        agent_identity="benchmark-agent-instance",
         service_identity="benchmark-runner",
         session_id=case.id,
         privilege_scope=privilege_scope,
     )
-    # AARM_IDENTITY_SECRET 設定時は identity を署名する（R6: 未署名だと AARMRuntime が警告を出す）
-    _identity_secret = os.getenv("AARM_IDENTITY_SECRET")
-    if _identity_secret:
-        identity = identity.sign(_identity_secret)
+    # R6: 未署名だと AARMRuntime が警告を出す
+    identity = (
+        identity
+        .sign_human(_BENCHMARK_HUMAN_KEY)
+        .sign_agent(_BENCHMARK_AGENT_KEY)
+        .sign_service(_BENCHMARK_SERVICE_KEY)
+    )
     policy, transform_registry = _build_policy(mode)
     runtime = AARMRuntime(
         user_intent=case.user_intent,

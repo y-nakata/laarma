@@ -35,7 +35,9 @@ class IdentityContext:
     R6: アクションを実行するアイデンティティの多層表現。
 
     委任の連鎖における3つの主体（依頼者 Human / 実行者 Agent / 調停者 Service）が、
-    それぞれ自分の Ed25519 秘密鍵で署名する。Human と Agent は自分の層を個別署名し、
+    それぞれ自分の Ed25519 秘密鍵で署名する。Human は human_principal と session_id を、
+    Agent は agent_identity と session_id を、それぞれ自分の層として個別署名する
+    （session_id を含めることで、署名を別セッションへ使い回すリプレイ攻撃を防ぐ）。
     Service は human_principal / agent_identity / service_identity / privilege_scope /
     session_id を束ねた包括署名で「これらが一つのアクションのために結合された」ことを保証する
     （Service 自身の個別署名は包括署名に内包されるため別途持たない）。

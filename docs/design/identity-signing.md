@@ -50,26 +50,33 @@ CSA版 R5 は tamper-evident なレシートを MUST とし、改ざんに対し
 - non-repudiation をどの主体の鍵でどう実現するかの具体策は実装裁量
 - 上記3点は、本メモ §3〜§4 で laarma の設計判断として確定する。
 
-## 2. laarma の現状（main）
+## 2. laarma の現状
 
-`IdentityContext`（`models.py`）は4フィールドを持ち、仕様の4層に対応する:
+`IdentityContext`（`models.py`）は §3〜§4 の方針どおり、Human（依頼者）/ Agent（実行者）/
+Service（調停者）が各自の Ed25519 秘密鍵で署名する構成を持つ:
 
 ```python
-human_principal:  str   # 例: alice@example.com
-service_identity: str   # 例: agent-svc@iam
-session_id:       str   # 例: sess_demo
-privilege_scope:  list[str]
-identity_token:   str | None  # sign() で付与される HMAC
+human_principal:    str        # 例: alice@example.com
+agent_identity:     str        # 例: fs-agent-instance-01
+service_identity:   str        # 例: agent-svc@iam
+session_id:         str        # 例: sess_demo
+privilege_scope:    list[str]
+human_signature:    str | None  # sign_human() で付与される Ed25519 署名（hex）
+agent_signature:    str | None  # sign_agent() で付与される Ed25519 署名（hex）
+service_signature:  str | None  # sign_service() で付与される包括署名（hex）
 ```
 
-`sign(secret)` は `_compute_token` を呼び、**4層全体を 1つの HMAC-SHA256 で一括署名**する。鍵は環境変数 `AARM_HMAC_SECRET`。
+- `sign_human` / `sign_agent` は各主体が自分の層（principal/identity + session_id）のみを署名する個別署名。session_id を含めることで、署名を別セッションへ使い回すリプレイ攻撃を防ぐ。
+- `sign_service` は human_principal / agent_identity / service_identity / privilege_scope / session_id を束ねた包括署名（§3「個別署名 + 包括署名」）。
+- 検証は `verify_human` / `verify_agent` / `verify_service`。`AARMRuntime` が `AARM_IDENTITY_PUBKEY_DIR`（principal の値をファイル名にした PEM 公開鍵を置くディレクトリ）から鍵を読んで検証する。
+- **laarma SDK は秘密鍵を生成・保管しない**（§4「laarma は発行者でなく検証者」）。§4 は Human の鍵について「laarma は alice の秘密鍵を生成・保管してはならない」と定めるが、これは3主体すべてに及ぶ ── Agent の鍵も Service の鍵もデモ側（`my_project`）が生成・保管するものであり、SDK 側にはどの主体の秘密鍵も置かない。SDK は公開鍵での検証のみを担う。鍵生成はデモ側（`my_project/identity_keys.py`、第1段階・CA なし自己生成）が担う。
 
 ### 現状の問題点
 
-1. **対称鍵（HMAC）では non-repudiation が成立しない**。署名者と検証者が同じ鍵を共有するため、「誰が署名したか」を区別できない。CSA版 R6 は non-repudiation を、論文 §VII-B-5 は非対称署名を求めている。
-2. **主体の混在**。`AARM_HMAC_SECRET` は環境変数（= サーバー/サービスの持ち物）だが、それで human_principal（alice）を含む全層を署名している。「alice が依頼した」ことの証明にはならず、「サービスが alice という値を含む context を作った」ことしか言えない。
-3. **freshness / revocation の検証がない**。`verify()` は HMAC 一致を見るだけで、発行時刻の鮮度も失効リスト照合もしない。
-4. **identity 欠如時に deny / flag しない**。未署名だと warning を出すだけで処理が流れる。
+非対称署名・主体分離は実装済みだが、R6 の要件のうち次が未充足（§5 のステップ5 で扱う）:
+
+1. **freshness / revocation の検証がない**。発行時刻の鮮度も失効リスト照合もしない（第2段階のローカル CA で扱う）。
+2. **identity 欠如時に deny / flag しない**。未署名・公開鍵欠如時は warning のみで処理が流れる（R6 MUST。検証可能なアイデンティティを欠くアクションを deny/flag する要件への対応）。
 
 ## 3. 設計方針
 
@@ -166,19 +173,19 @@ ECDSA P-256 / RSA は、既存 PKI（組織の証明書基盤、HSM、WebPKI）�
 
 - デモ用に生成する秘密鍵・鍵ペアは**リポジトリに一切コミットしない**。`.gitignore` に `*.key` / `*.pem` / `keys/` を追加済み。
 - 鍵は `keys/` ディレクトリ配下に置く運用とし、`keys/` ごと無視する。デモ用の公開鍵（`alice.pub` 等）も、秘密鍵とまとめて `keys/` に置いて無視する（公開鍵自体は本来コミット可能だが、デモ鍵をリポジトリに残さない方針を優先）。
-- これは `.env`（`AARM_HMAC_SECRET`）を gitignore する既存方針と同じ、公開リポジトリの秘密情報衛生の一環。
+- これは `.env`（`AARM_RECEIPT_SECRET` 等）を gitignore する既存方針と同じ、公開リポジトリの秘密情報衛生の一環。
 
 ## 5. スモールステップへの分解
 
-現状から設計方針までは距離がある。一気にやらず段階を分ける:
+現状から設計方針までは距離があるため、Issue #55 で以下のステップ（PR-1a 〜 PR-5）に分けて実施する。各ステップ名は当 Issue 内での呼称。
 
-1. **命名・概念の修正**: `sign` が「主体が署名」を示唆するが実態は「システムによる attestation」であることを明確化。
-2. **鍵の分離**: receipt の tamper-evidence（システムの鍵）と identity の non-repudiation（各主体の鍵）を分ける。現状は両方とも `AARM_HMAC_SECRET`。
-3. **非対称署名化**: HMAC → Ed25519（§4 の通り、Service / Agent は Ed25519 で統一。Human もプロトタイプ第1段階では Ed25519 自己生成）。
-4. **二段署名化**: 当事者（Human / Agent）の個別署名 + 調停者（Service）の包括署名。
-5. **検証の充実**: freshness / revocation（第2段階のローカル CA で CRL 照合をデモ）、identity 欠如時の deny/flag。
+1. ✅ **命名・概念の修正**（PR-1a, #80）: `sign` が「主体が署名」を示唆するが実態は「システムによる attestation」であることを明確化。
+2. ✅ **鍵の分離**（PR-1b, #83）: receipt の tamper-evidence（システムの鍵）と identity の non-repudiation（各主体の鍵）を分ける。
+3. ✅ **非対称署名化**（PR-2, #86）: HMAC → Ed25519（§4 の通り、3主体とも Ed25519。プロトタイプ第1段階では Human も自己生成）。
+4. ✅ **二段署名化**（PR-2, #86 に統合実施）: 当事者（Human / Agent）の個別署名 + 調停者（Service）の包括署名。
+5. **検証の充実**（未着手）: freshness / revocation（第2段階のローカル CA で CRL 照合をデモ）、identity 欠如時の deny/flag。
 
 ## 関連
 
-- README の仕様準拠表で R6 を「⚠️ 部分準拠（非対称署名未実装）」としているのは、本メモの問題を指す。実装が §3〜§5 の方針で完了したら「✅ 準拠」に更新する。
+- README の仕様準拠表の R6 は、本メモ §3〜§4 の非対称署名・主体分離が実装された旨を反映する（freshness/revocation・deny/flag は §5 ステップ5 待ちのため、まだ「✅ 準拠」への変更はしない）。
 - レシートの tamper-evidence 範囲（deferral 系フィールドがハッシュ対象外）については #45。

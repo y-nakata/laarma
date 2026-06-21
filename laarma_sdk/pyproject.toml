@@ -11,6 +11,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "pyyaml>=6.0",
     "sentence-transformers>=3.0.0",
+    "cryptography>=42.0.0",
 ]
 
 [tool.setuptools.packages.find]

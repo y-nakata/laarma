@@ -39,33 +39,46 @@ python my_project/demo.py
 
 メモリ内のレシートは `runtime.receipts`（`list[dict]`）で参照できます。
 
-## HMAC 署名鍵（AARM_RECEIPT_SECRET / AARM_IDENTITY_SECRET）
+## receipt の HMAC 署名鍵（AARM_RECEIPT_SECRET）
 
-`receipt_hash`（改ざん検知）と `identity_token`（identity attestation）は性質の異なる鍵で
-保護されます:
+`receipt_hash`（改ざん検知）は `AARM_RECEIPT_SECRET` の HMAC-SHA256 鍵で保護されます。
+未設定時は鍵なし SHA-256 にフォールバックし、警告が出ます。
 
-- `AARM_RECEIPT_SECRET` — `receipt_hash` の HMAC-SHA256 鍵。未設定時は鍵なし SHA-256 に
-  フォールバックし、警告が出ます。
-- `AARM_IDENTITY_SECRET` — `identity_token` の HMAC-SHA256 鍵。`IdentityContext.sign()` /
-  `verify()` が使う。
+identity の署名（non-repudiation）は別レイヤーで、HMAC 共有鍵ではなく
+**Human/Agent/Service 各主体の Ed25519 鍵**を使う（次節「identity 署名（Ed25519）」参照）。
 
 ### 鍵の生成と設定
 
 暗号的にランダムな 32 バイト（64 文字の 16 進）を鍵に使います。
 
 ```bash
-# 鍵を生成して環境変数に設定（receipt 用・identity 用は別の鍵にする）
 export AARM_RECEIPT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
-export AARM_IDENTITY_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
 # または
 export AARM_RECEIPT_SECRET=$(openssl rand -hex 32)
-export AARM_IDENTITY_SECRET=$(openssl rand -hex 32)
 ```
 
 **重要な注意点**:
 - 鍵は**固定して使い続ける**必要があります。HMAC は鍵に紐づくため、鍵を変えると過去のレシートの `receipt_hash` が検証できなくなります。上記の `$(...)` は実行のたびに別の鍵を生成するため、固定したい場合は生成した値を `.env` 等に保存して使います。
 - `.env` ファイルに保存する場合は `.gitignore` に追加してください（公開リポジトリへの漏洩防止）。
 - ログ生成途中で `AARM_RECEIPT_SECRET` を設定・変更すると、鍵なし SHA-256 行と HMAC 行が混在します。混在ログの検証は `--allow-mixed` オプションを使用してください。
+
+## identity 署名（Ed25519）
+
+`IdentityContext` は Human（依頼者）/ Agent（実行者）/ Service（調停者）の3主体それぞれの
+Ed25519 鍵で署名する（`human_signature` / `agent_signature` / `service_signature`）。
+Human・Agent は自分の層のみを個別署名し、Service は3層全体＋`privilege_scope` を束ねた
+包括署名を行う。詳細は [docs/design/identity-signing.md](design/identity-signing.md) §3〜§4。
+
+- laarma SDK は秘密鍵を生成・保管しない（検証者であって発行者ではない）。鍵の生成は
+  呼び出し側（このプロトタイプでは `my_project/identity_keys.py`）が担う。
+- `AARM_IDENTITY_PUBKEY_DIR` に、各主体の公開鍵 PEM を **principal の値そのものをファイル名**
+  にして置く（例: `alice@example.com.pub`, `agent-svc@iam.pub`）。`AARMRuntime` がこの値で
+  ファイルを探して検証する。
+- ディレクトリ未設定、または該当ファイルが無い場合は従来どおり警告のみで処理を続行する
+  （deny/flag はしない。これは PR-4 の領分）。
+- デモ・ベンチマークでは `my_project/identity_keys.py` の `load_or_create_keypair()` が
+  `keys/` 配下に鍵が無ければ自己生成する（第1段階・CA なし）。`keys/` は `.gitignore` 済みで
+  コミットされない。
 
 ## 改ざんチェック
 
@@ -81,7 +94,7 @@ AARM_RECEIPT_SECRET=your_secret python -m laarma.audit --allow-mixed aarm_audit.
 ```
 
 各エントリの `receipt_hash` を再計算して一致を検証します（終了コード 1 で不一致報告）。
-検証に使うのは `AARM_RECEIPT_SECRET` のみ（`AARM_IDENTITY_SECRET` は無関係）。
+検証に使うのは `AARM_RECEIPT_SECRET` のみ（identity 署名とは無関係な別レイヤー）。
 
 > **注: `AARM_RECEIPT_SECRET` 未設定時の限界**
 > `AARM_RECEIPT_SECRET` が未設定の場合、`receipt_hash` は鍵なし SHA-256 で計算されるため、

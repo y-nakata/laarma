@@ -312,35 +312,34 @@ class PolicyEngine:
         environment: EnvironmentContext | None,
     ) -> AuthorizationResult:
         """
-        提案を IntentAlignment に確認する。
-        IA が ALLOW → 提案確定。ALLOW 以外 → 上書き（proposed_decision を記録）。
-        IA が未注入の場合は提案をそのまま確定。
+        提案を IntentAlignment に確認する。IA が未注入の場合は提案をそのまま確定。
 
-        IntentAlignment に渡すアクションは、`modified_params` の有無で決める（decision では決めない）。
-        変換が適用されていれば実行に向かうのは a' なので IA にも a' を渡す。
+        IntentAlignment には常に original_action（a）を渡す。IA の役割は
+        「エージェントの意図 a が妥当か」の評価であり、実行されるパラメータ a' が
+        安全かどうかではない。パラメータの封じ込め（path 無害化等）は PolicyEngine の
+        決定論的な別レイヤーであり、IA はそれを覆す権威を持たない。
+
+        採用関係は非対称:
+        - IA が ALLOW → proposal をそのまま確定（decision・modified_params・
+          policy_rule_id は PolicyEngine 提案のまま）。
+        - IA が ALLOW 以外（DENY/DEFER/STEP_UP） → 最終 decision・reason は IA のものを
+          採用する（IA は「a が妥当でない」という判断自体の権威を持つ）。ただし
+          modified_params は proposal（PolicyEngine 由来）を保持し、IA の結果で
+          上書きしない — IA は変換を生成も書き換えもできない。
         """
         if self._ia is None:
             return proposal
 
-        if proposal.modified_params:
-            eval_action = Action(
-                tool_name=original_action.tool_name,
-                parameters=proposal.modified_params,
-                identity=original_action.identity,
-                action_id=original_action.action_id,
-                timestamp=original_action.timestamp,
-            )
-        else:
-            eval_action = original_action
-
-        ia_result = self._ia.evaluate(eval_action, context_summary, environment)
+        ia_result = self._ia.evaluate(original_action, context_summary, environment)
 
         if ia_result.decision == Decision.ALLOW:
             return proposal  # 提案確定
 
-        # IA が上書き — policy_rule_id（発火ルール）を保持し、proposed_decision を記録
+        # IA が上書き — decision/reason は IA 由来。modified_params は proposal を保持し、
+        # policy_rule_id（発火ルール）と proposed_decision（元の提案）を記録する。
         return dc_replace(
             ia_result,
+            modified_params=proposal.modified_params,
             policy_rule_id=proposal.policy_rule_id,
             proposed_decision=proposal.decision.value,
         )

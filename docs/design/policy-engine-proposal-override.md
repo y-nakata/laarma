@@ -279,14 +279,28 @@ MODIFY が他の決定と異なり厄介なのは、**それが「決定」で�
 - 最終 a' で required_params が揃えば → MODIFY 提案のまま
 - 最終 a' でも不足なら → **変換を保持したまま**（元の危険な a に戻さない。DeferralResolver が危険な a を相手にするのを避けるため）DEFER 提案に切り替える。`modified_params` は提案に乗せ続ける（`decision=DEFER` だが `modified_params` あり、という状態。STEP_UP+modified_params と同じ構造で、データモデルは許容する）
 
-### IntentAlignment に渡すアクションは `modified_params` の有無で決める（decision では決めない）
+### modify_transform の不変条件: narrowing（封じ込め）に限る
 
-`_confirm_with_ia()` が IntentAlignment に渡すアクションの選択基準は、**提案の `decision` が MODIFY かどうかではなく、`modified_params` が存在するか（＝変換が適用されたか）**である。
+`modify_transform` に登録する変換は narrowing（封じ込め）に限る。能力を広げる/意味を変える変換は MODIFY ではなく DENY か STEP_UP の対象（#88）。
 
-理由: IntentAlignment は ALLOW 以外を返せば提案を上書きする＝その判断が最終決定になりうる。だから IntentAlignment が評価する対象は「実際に実行に向かうアクション」でなければならない。変換が適用されていれば実行に向かうのは a' なので、IntentAlignment にも a' を渡す。これは提案が MODIFY でも、（MODIFY 変換を経た）DEFER でも同じ。decision で分岐すると、変換を経た DEFER 提案のときに誤って元の a を評価してしまい、「評価した対象」と「その判断の帰結を受ける対象」がズレる。
+この不変条件があるからこそ、a' の auto-apply に根拠が成り立つ: a' は a を狭めるだけで新しい能力を足さない（basename は path をワークスペース内に狭める。数値クランプ・安全フラグ強制も同様）。次節で述べる「IntentAlignment に a' を見せない」という設計は、a' が PolicyEngine の決定的変換による narrowing の結果であり、かつ a 自体が意図に沿うと IntentAlignment が判定済みであることに依拠する——「IA が a を承認 ⟹ a' ⊑ a は a より危険になりようがない」。
 
-- 提案に `modified_params` あり → それを適用した a' を IntentAlignment に渡す
-- なし → 元の a を渡す
+現状、`policy.yaml` のルールが `modify_transform` で参照する変換は `unsafe_write_path` の `basename` のみであり、narrowing を満たす。今後ルールに変換を追加する際は、この不変条件を満たすことを確認する。
+
+### IntentAlignment には常に original action（a）を渡す
+
+`_confirm_with_ia()` が IntentAlignment に渡すアクションは、提案の `modified_params` の有無や `decision` にかかわらず、**常に original action（a）**である。a' を渡すことはない。
+
+理由（#88、IA(LLM) が確定的 MODIFY を覆した退行の修正）: IntentAlignment の役割は「エージェントの**意図** a が妥当か」を評価することであり、「実行されるパラメータ a' が安全か」を判定することではない。パラメータの封じ込め（path 無害化等）は PolicyEngine の決定論的な別レイヤーが担い、この二層は直交していて混ぜない。a' は組織の合意形成を符号化した `modify_transform`（TCB の一部）の出力であり、ランタイムの IA はその合意文脈 C を代理で持てない——IA に a' を見せて「ユーザ意図とズレている」と判定させることは、match(a,C) の権威を IA に渡すことに等しく、確定的に守ったはずの a' を LLM が覆す経路を開く。
+
+IA に a を渡せば、シグナル（`semantic_distance` / `action_matches_intent` など、いずれも a で計算済み）と `proposed_action` が常に a で一貫し、「a' の値が a と違う」という偽トリガーが構造的に発生しない。
+
+採用関係（`_confirm_with_ia()` の非対称な振る舞い）:
+
+- IA が **ALLOW** → 提案を確定する（`decision`・`modified_params`・`policy_rule_id` は PolicyEngine 提案のまま）。
+- IA が **ALLOW 以外**（DENY/DEFER/STEP_UP） → 最終 `decision`・`reason` は IA のものを採用する（IA は「a が妥当でない」という判断自体の権威を持つ）。ただし **`modified_params` は提案（PolicyEngine 由来）を保持し、IA の結果で上書きしない**——IA は変換を生成も書き換えもできない（IA から MODIFY を除いたことの帰結。#88）。
+
+> 本節は IntentAlignment(LLM) の**評価入力**として何を見せるかの設計であり、STEP_UP の**承認者**（人間）に何を提示するかとは別の問題である。次節「STEP_UP に modified_params が乗るケースの扱い」（#70 で確定済み）は変更しない: PolicyEngine が施した a' は、receipt・承認者への提示には引き続き乗る。IA(LLM) への評価入力を a に統一することと、人間の承認者が a' を見て y/n することは、混同しない。
 
 ### DEFER の解決先は DEFER を含まない
 
@@ -298,7 +312,9 @@ DEFER 提案が IntentAlignment を通って DEFER 確定した後、DeferralRes
 
 ### STEP_UP に modified_params が乗るケースの扱い
 
-提案が MODIFY（`a'`）で、IntentAlignment が `a'` を評価して STEP_UP を返すケースがありうる。このとき:
+> 本節と次節は、PolicyEngine が施した a' を**人間の承認者**にどう提示するか（#70 で確定済みの仕様）を扱う。IntentAlignment(LLM) の評価入力を常に a に統一する前節の設計とは別個であり、前節の変更によって本節・次節の内容は変わらない。
+
+提案が MODIFY（`a'`）で、IntentAlignment が **a を評価して** STEP_UP を返すケースがありうる（IA には常に a が渡るため、IA が見るのは a であって a' ではない。a' は IA の判断を経て確定した提案に PolicyEngine 由来のまま乗り続け、承認者への提示で使われる）。このとき:
 
 - **`decision` は標準の5値の1つである `STEP_UP` のまま**にする（R4 の決定モデルを拡張しない）
 - `modified_params`（PolicyEngine が施した変換）は、**承認者に提示する「完全なアクションコンテキスト」の一部**として receipt に残す。これは R4 の STEP_UP 要件「承認者には完全なアクションコンテキストが利用可能でなければならない」と整合する

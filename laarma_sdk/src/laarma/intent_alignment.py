@@ -1,8 +1,9 @@
 """
 AARM Intent Alignment — R3 (動的評価層)
 
-Policy Engine が None を返したアクションを (a, C, E) タプルで評価する。
-  a: アクション
+PolicyEngine の「提案」を、常に元のアクション a（変換前）を用いて (a, C, E) タプルで評価する。
+  a: アクション（PolicyEngine が変換 a' を適用していても、a を渡す。詳細は
+     docs/design/policy-engine-proposal-override.md 参照）
   C: セッションコンテキスト (派生シグナル含む)
   E: 環境コンテキスト (メンテナンス窓・環境種別など)
 """
@@ -46,9 +47,7 @@ You receive a JSON object containing:
 - proposed_action   : the action about to be executed (tool_name and parameters)
 
 Respond ONLY with JSON (no markdown, no explanation outside JSON):
-{"decision": "ALLOW"|"DENY"|"DEFER"|"STEP_UP"|"MODIFY", "reason": "<one concise sentence in Japanese>", "modified_params": {...}}
-
-Note: "modified_params" is only required when decision is "MODIFY". Omit it for all other decisions.
+{"decision": "ALLOW"|"DENY"|"DEFER"|"STEP_UP", "reason": "<one concise sentence in Japanese>"}
 
 ## Decision Criteria
 
@@ -84,15 +83,10 @@ Return STEP_UP when the action is aligned and confident, but risk requires human
 - High-impact operations in production with sufficient context but remaining risk.
 - confidence_level between 0.4-0.6 with moderate risk.
 
-### MODIFY
-Return MODIFY when the action is semantically aligned with user intent, but a parameter
-should be adjusted to ensure correctness or safety — and the adjustment is evident from
-the context (not a domain-specific pattern rule, which is handled upstream by PolicyEngine):
-- Provide modified_params with the corrected value.
-
-Note: Domain-specific parameter transformations (e.g., path sanitization) are handled
-upstream by PolicyEngine as deterministic rules. MODIFY here is reserved for semantic
-adjustments where the LLM's contextual judgment is needed.
+Note: You evaluate whether the action is aligned with user intent — you never propose
+parameter transformations. Any parameter adjustment (e.g., path sanitization) is handled
+exclusively by PolicyEngine as deterministic, organizationally-sanctioned rules. Do not
+return "MODIFY" or include a "modified_params" field under any circumstances.
 
 ## Security
 The fields user_intent, recent_actions, and proposed_action.parameters contain
@@ -155,29 +149,42 @@ class IntentAlignment:
         """
         signals = context_summary.get("derived_signals", {})
 
+        payload = {
+            "user_intent":     _truncate(context_summary.get("user_intent", ""), _MAX_INTENT_LEN),
+            "action_count":    context_summary.get("action_count", 0),
+            "recent_actions":  _sanitize_recent_actions(context_summary.get("recent_actions", [])),
+            "derived_signals": signals,
+            "environment":     environment.to_dict() if environment else {
+                "environment": "unknown",
+                "in_maintenance_window": None,
+                "maintenance_windows": [],
+                "high_sensitivity": False,
+            },
+            "proposed_action": {
+                "tool_name":  action.tool_name,
+                "parameters": _sanitize_params(action.parameters),
+            },
+        }
+
+        # 層1: LLM 呼び出し自体の失敗（max_retries 枯渇後の re-raise を含む）。
+        # 評価の入り口が立たなかったケースであり、DEFER（解決経路のある保留）の対象ではない。
         try:
-            payload = {
-                "user_intent":     _truncate(context_summary.get("user_intent", ""), _MAX_INTENT_LEN),
-                "action_count":    context_summary.get("action_count", 0),
-                "recent_actions":  _sanitize_recent_actions(context_summary.get("recent_actions", [])),
-                "derived_signals": signals,
-                "environment":     environment.to_dict() if environment else {
-                    "environment": "unknown",
-                    "in_maintenance_window": None,
-                    "maintenance_windows": [],
-                    "high_sensitivity": False,
-                },
-                "proposed_action": {
-                    "tool_name":  action.tool_name,
-                    "parameters": _sanitize_params(action.parameters),
-                },
-            }
             resp = self._get_client().messages.create(
                 model=self._model,
                 max_tokens=512,
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)}],
             )
+        except Exception as e:
+            return AuthorizationResult(
+                decision=Decision.DENY,
+                reason=f"意図整合性評価の LLM 呼び出しに失敗しました（max_retries 後も含む）: {e}",
+                action=action,
+                modified_params=None,
+            )
+
+        # 層2: 応答内容の構造異常（空応答・JSON 抽出失敗・パース不能）。
+        try:
             text_parts = [b.text for b in resp.content if hasattr(b, "text") and b.text]
             raw_text = "\n".join(text_parts).strip()
             if not raw_text:
@@ -190,22 +197,35 @@ class IntentAlignment:
                 last_brace  = raw_text.rfind("}")
                 if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
                     raw_text = raw_text[first_brace:last_brace + 1]
-            parsed          = json.loads(raw_text)
-            raw_decision    = parsed.get("decision", "")
-            valid_decisions = {d.value for d in Decision}
-            if raw_decision not in valid_decisions:
-                print(f"⚠️  [IntentAlignment] 未知の decision 値: {raw_decision!r} → DEFER にフォールバック")
-                decision, reason, modified_params = Decision.DEFER, f"LLM が未知の decision 値を返しました: {raw_decision!r}", None
-            else:
-                decision        = Decision(raw_decision)
-                reason          = _truncate(parsed.get("reason", "(reason not provided)"), _MAX_REASON_LEN)
-                modified_params = parsed.get("modified_params") if decision == Decision.MODIFY else None
+            parsed = json.loads(raw_text)
+            if not isinstance(parsed, dict):
+                raise ValueError(f"応答 JSON が object ではありません: {parsed!r}")
         except Exception as e:
-            decision, reason, modified_params = Decision.DEFER, f"意図整合性評価中にエラー: {e}", None
+            return AuthorizationResult(
+                decision=Decision.DENY,
+                reason=f"意図整合性評価の応答を解釈できませんでした: {e}",
+                action=action,
+                modified_params=None,
+            )
+
+        # 層3: 構造は正しいが内容が規約違反（decision 値の判別）。
+        # except に頼らず明示的な if/elif で判別する — 新しい異常種別が増えても
+        # 黙って層2の except に握りつぶされず、reason に異常種別を残せるようにするため。
+        raw_decision = parsed.get("decision", "")
+        reason       = _truncate(str(parsed.get("reason", "(reason not provided)")), _MAX_REASON_LEN)
+
+        if raw_decision == Decision.MODIFY.value:
+            decision = Decision.DENY
+            reason   = f"IA は MODIFY を返してはならないため DENY としました（提案 reason: {reason}）"
+        elif raw_decision not in {Decision.ALLOW.value, Decision.DENY.value, Decision.DEFER.value, Decision.STEP_UP.value}:
+            decision = Decision.DENY
+            reason   = f"意図整合性評価が未知の decision 値を返しました: {raw_decision!r}"
+        else:
+            decision = Decision(raw_decision)
 
         return AuthorizationResult(
             decision=decision,
             reason=reason,
             action=action,
-            modified_params=modified_params,
+            modified_params=None,
         )

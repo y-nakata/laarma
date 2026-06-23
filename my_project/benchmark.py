@@ -39,11 +39,11 @@ _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from laarma import (
     AARMRuntime, Decision, EnvironmentContext, IdentityContext,
-    MaintenanceWindow, Policy, load_policy,
+    IntentAlignment, MaintenanceWindow, Policy, load_policy,
 )
 from laarma.models import Action, AuthorizationResult
 from laarma.policy_engine import DEFAULT_POLICY
@@ -295,6 +295,90 @@ def run_step_up_unit_tests() -> int:
     return fail_count
 
 
+def _fake_llm_text_response(text: str) -> MagicMock:
+    """anthropic.Anthropic().messages.create() の戻り値を模した MagicMock。"""
+    block = MagicMock()
+    block.text = text
+    resp = MagicMock()
+    resp.content = [block]
+    resp.stop_reason = "end_turn"
+    return resp
+
+
+def run_intent_alignment_anomaly_unit_tests() -> int:
+    """
+    IntentAlignment.evaluate() の出力バリデーション（#88）をユニットレベルで検証する。
+    anthropic クライアントをモックし、LLM の異常応答・呼び出し失敗が
+    すべて DENY に収束すること（DEFER フォールバックが残っていないこと）を確認する。
+
+    Returns: 失敗ケース数（0 = 全 PASS）。
+    """
+    _dummy_action = Action(tool_name="write_file", parameters={"path": "config.bak", "content": "x"})
+    _context_summary = {
+        "user_intent": "設定ファイルのバックアップを書き出して",
+        "action_count": 0,
+        "recent_actions": [],
+        "derived_signals": {},
+    }
+
+    cases = [
+        {
+            "id": "ia_anomaly_modify_returned",
+            "llm_text": '{"decision": "MODIFY", "reason": "should not happen", "modified_params": {"path": "x"}}',
+            "raises": None,
+            "reason_substr": "MODIFY を返してはならない",
+        },
+        {
+            "id": "ia_anomaly_unknown_decision",
+            "llm_text": '{"decision": "FOOBAR", "reason": "unknown"}',
+            "raises": None,
+            "reason_substr": "未知の decision 値",
+        },
+        {
+            "id": "ia_anomaly_unparseable_response",
+            "llm_text": "申し訳ありませんが対応できません。",
+            "raises": None,
+            "reason_substr": "応答を解釈できませんでした",
+        },
+        {
+            "id": "ia_anomaly_client_call_fails",
+            "llm_text": None,
+            "raises": Exception("simulated max_retries exhausted"),
+            "reason_substr": "LLM 呼び出しに失敗しました",
+        },
+    ]
+
+    print("\n--- IntentAlignment anomaly → DENY unit tests (#88) ---")
+    fail_count = 0
+    for c in cases:
+        ia = IntentAlignment()
+        mock_client = MagicMock()
+        if c["raises"] is not None:
+            mock_client.messages.create.side_effect = c["raises"]
+        else:
+            mock_client.messages.create.return_value = _fake_llm_text_response(c["llm_text"])
+
+        with patch.object(IntentAlignment, "_get_client", return_value=mock_client):
+            result = ia.evaluate(_dummy_action, _context_summary, environment=None)
+
+        ok = (
+            result.decision == Decision.DENY
+            and result.modified_params is None
+            and c["reason_substr"] in result.reason
+        )
+        label = "✅" if ok else "❌"
+        print(f"{label} {c['id']}")
+        if not ok:
+            print(f"   decision:        expected=DENY  actual={result.decision.value}")
+            print(f"   modified_params: expected=None  actual={result.modified_params}")
+            print(f"   reason contains '{c['reason_substr']}': actual={result.reason!r}")
+            fail_count += 1
+
+    total = len(cases)
+    print(f"{total - fail_count} passed, {fail_count} failed\n")
+    return fail_count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run AARM benchmark cases.")
     parser.add_argument("--data-file", default="benchmark_data.jsonl", help="Benchmark dataset JSONL file")
@@ -433,7 +517,8 @@ def main() -> int:
         print("\nNote: intent-alignment mode is exploratory; mismatches do not cause a nonzero exit status.")
 
     step_up_fail_count = run_step_up_unit_tests()
-    return 1 if (fail_count or step_up_fail_count) else 0
+    ia_anomaly_fail_count = run_intent_alignment_anomaly_unit_tests()
+    return 1 if (fail_count or step_up_fail_count or ia_anomaly_fail_count) else 0
 
 
 if __name__ == "__main__":

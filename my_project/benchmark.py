@@ -69,6 +69,24 @@ class _AlwaysAllowStub:
     ) -> AuthorizationResult:
         return AuthorizationResult(decision=Decision.ALLOW, reason="stub", action=action)
 
+
+class _IASpy:
+    """
+    実 IntentAlignment をラップし、evaluate() が呼ばれたかどうかだけを記録する計測用スパイ。
+
+    PolicyEngine.evaluate() は DENY が確定する3経路（denied_tools / privilege_scope /
+    静的ルールでの DENY）でのみ IntentAlignment を呼ばずに終端する。この呼び出しの有無を
+    観測すれば、各ケースが pipeline モードで LLM 依存かどうかをルール変更に追従して
+    判定できる（ベンチマーク側の計測のみで、IntentAlignment の挙動自体は変えない）。
+    """
+    def __init__(self, real: IntentAlignment) -> None:
+        self._real = real
+        self.called = False
+
+    def evaluate(self, *args: Any, **kwargs: Any) -> AuthorizationResult:
+        self.called = True
+        return self._real.evaluate(*args, **kwargs)
+
 # path 変換のドメイン知識。policy.yaml の modify_transform が参照する。
 _TRANSFORM_REGISTRY: dict[str, Any] = {
     "basename":    os.path.basename,
@@ -89,6 +107,10 @@ class BenchmarkCase:
     expected_modified_params: dict[str, Any] | None
     identity: dict[str, Any] | None = None
     pipeline_only: bool = False  # True のとき policy-engine モードでスキップ
+    # True のとき、pipeline モードでの不一致は fail にせず informational として扱う
+    # （expected_decision は policy-engine モードでの検証が主、pipeline での IA 上書きは別 issue 依存）
+    pipeline_informational: bool = False
+    note: str | None = None  # ケースの検証意図・素性の説明（ロジックには使わない）
 
 
 def load_cases(path: Path) -> list[BenchmarkCase]:
@@ -107,6 +129,8 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 expected_modified_params=data.get("expected_modified_params"),
                 identity=data.get("identity"),
                 pipeline_only=data.get("pipeline_only", False),
+                pipeline_informational=data.get("pipeline_informational", False),
+                note=data.get("note"),
             ))
     return cases
 
@@ -171,10 +195,12 @@ def run_case(
     case: BenchmarkCase,
     mode: str = "pipeline",
     model: str | None = None,
-) -> tuple[Decision | None, dict[str, Any] | None, float, str, str | None, dict | None]:
+) -> tuple[Decision | None, dict[str, Any] | None, float, str, str | None, dict | None, bool]:
     """
-    Returns (decision, modified_params, elapsed_seconds, status, reason, context_summary).
+    Returns (decision, modified_params, elapsed_seconds, status, reason, context_summary, ia_invoked).
     status: "run" | "skip"
+    ia_invoked: pipeline モードで IntentAlignment.evaluate() が実際に呼ばれたか
+                （policy-engine モードでは常に False — スタブで代用するため計測不要）。
     """
     expected = Decision(case.expected_decision)
 
@@ -182,7 +208,7 @@ def run_case(
     if mode == "policy-engine" and (
         expected not in _POLICY_ENGINE_DECISIONS or case.pipeline_only
     ):
-        return None, None, 0.0, "skip", None, None
+        return None, None, 0.0, "skip", None, None, False
 
     env = build_environment(case.environment)
     # case に identity.privilege_scope があればそれを使い、なければ評価対象ツールのみ許可する
@@ -206,6 +232,11 @@ def run_case(
         .sign_service(_BENCHMARK_SERVICE_KEY)
     )
     policy, transform_registry = _build_policy(mode)
+    # AARMRuntime のデフォルト解決 (model or AARM_MODEL or claude-sonnet-4-6) を計測用にも合わせる
+    ia_spy = (
+        _IASpy(IntentAlignment(model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")))
+        if mode == "pipeline" else None
+    )
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,
@@ -214,12 +245,16 @@ def run_case(
         policy=policy,
         transform_registry=transform_registry,
         _skip_intent_alignment_for_testing=(mode == "policy-engine"),
-        _intent_alignment=(_AlwaysAllowStub() if mode == "policy-engine" else None),
+        _intent_alignment=(_AlwaysAllowStub() if mode == "policy-engine" else ia_spy),
     )
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
     elapsed = time.monotonic() - start
-    return result.decision, result.modified_params, elapsed, "run", result.reason, runtime.context_summary
+    ia_invoked = ia_spy.called if ia_spy is not None else False
+    return (
+        result.decision, result.modified_params, elapsed, "run", result.reason,
+        runtime.context_summary, ia_invoked,
+    )
 
 
 def run_step_up_unit_tests() -> int:
@@ -397,6 +432,13 @@ def main() -> int:
     parser.add_argument("--pure-intent-alignment", action="store_true",
                         help="Alias for --mode intent-alignment (backwards compatible)")
     parser.add_argument("--verbose", action="store_true", help="Show detailed case output")
+    parser.add_argument(
+        "--repeat", type=int, default=3,
+        help=(
+            "pipeline モードで IntentAlignment が実際に関与したケースのみ、安定性計測のため"
+            "この回数だけ繰り返し実行する（default: 3）。IA を呼ばない決定論ケースや他モードは常に1回。"
+        ),
+    )
     args = parser.parse_args()
 
     mode = args.mode
@@ -414,9 +456,12 @@ def main() -> int:
     fail_count = 0
     skip_count = 0
     inform_count = 0
+    unstable_count = 0
     summary: dict[str, int] = {d.value: 0 for d in Decision}
     mismatches: list[str] = []
-    inform_mismatches: list[str] = []
+    ia_passthrough_mismatches: list[str] = []
+    pipeline_informational_mismatches: list[str] = []
+    unstable_cases: list[tuple[str, int, int]] = []
     strict_mode = (mode != "intent-alignment")
 
     print(f"Loaded {len(cases)} benchmark cases from {data_path}")
@@ -429,8 +474,15 @@ def main() -> int:
         print("Note: policy-engine mode skips ALLOW/STEP_UP cases (not decidable without IntentAlignment).")
     print()
 
+    def _ok(decision: Decision, modified_params: dict | None, expected: str, case: BenchmarkCase) -> bool:
+        return (
+            decision.value == expected
+            and compare_modified_params(modified_params, case.expected_modified_params)
+        )
+
     for case in cases:
-        decision, modified_params, elapsed, status, reason, context = run_case(case, mode=mode, model=args.model)
+        run = run_case(case, mode=mode, model=args.model)
+        decision, modified_params, elapsed, status, reason, context, ia_invoked = run
 
         if status == "skip":
             skip_count += 1
@@ -438,10 +490,26 @@ def main() -> int:
                 print(f"Case: {case.id}  [SKIP — not decidable by PolicyEngine alone]")
             continue
 
-        total_time += elapsed
-        summary[decision.value] += 1
         expected = case.expected_decision
-        ok = decision.value == expected and compare_modified_params(modified_params, case.expected_modified_params)
+        runs = [run]
+        # 安定性計測は pipeline モードで IntentAlignment が実際に関与したケースのみ。
+        # 決定論ケース（denied_tools/privilege_scope/静的 DENY ルールで終端）は1回で確定する。
+        repeat_n = args.repeat if (mode == "pipeline" and ia_invoked) else 1
+        for _ in range(repeat_n - 1):
+            runs.append(run_case(case, mode=mode, model=args.model))
+
+        total_time += sum(r[2] for r in runs)
+        summary[decision.value] += 1
+
+        oks = [_ok(r[0], r[1], expected, case) for r in runs]
+        pass_n = sum(oks)
+        total_n = len(runs)
+        if pass_n == total_n:
+            stability = "stable_pass"
+        elif pass_n == 0:
+            stability = "stable_fail"
+        else:
+            stability = "mixed"
 
         # policy-engine モードで PolicyEngine が ALLOW（= pass-through）を返したが
         # 期待値が DENY/STEP_UP の場合は「IntentAlignment が担うべき判断」であり
@@ -451,25 +519,53 @@ def main() -> int:
             and decision == Decision.ALLOW
             and expected in (Decision.DENY, Decision.STEP_UP, Decision.DEFER)
         )
+        # pipeline_informational ケース（例: defer_production_delete）は、expected_decision の
+        # 検証主体が policy-engine モードであり、pipeline での不一致は #94 の射程（IA 上書き）の
+        # ため fail にしない。ただし実際の decision はサマリに残し、症状を追跡可能にする。
+        pipeline_informational_mismatch = (
+            mode == "pipeline" and case.pipeline_informational and stability != "stable_pass"
+        )
 
-        if ok:
+        if stability == "stable_pass":
             pass_count += 1
+        elif stability == "mixed":
+            unstable_count += 1
+            unstable_cases.append((case.id, pass_n, total_n))
         elif ia_passthrough:
             inform_count += 1
-            inform_mismatches.append(case.id)
+            ia_passthrough_mismatches.append(case.id)
+        elif pipeline_informational_mismatch:
+            inform_count += 1
+            pipeline_informational_mismatches.append(
+                f"{case.id} (expected={expected}, actual={decision.value})"
+            )
         elif strict_mode:
             fail_count += 1
             mismatches.append(case.id)
         else:
             mismatches.append(case.id)
 
-        if args.verbose or (not ok and not ia_passthrough):
-            label = "✅" if ok else ("ℹ️ " if ia_passthrough else ("⚠️" if not strict_mode else "❌"))
+        informational = ia_passthrough or pipeline_informational_mismatch
+        # ia_passthrough（policy-engine の ALLOW pass-through）は元から非表示。
+        # pipeline_informational の不一致は informational でも実際の decision を可視化するため表示する。
+        if args.verbose or (stability != "stable_pass" and not ia_passthrough):
+            if stability == "mixed":
+                label = "🔀"
+            elif stability == "stable_pass":
+                label = "✅"
+            elif informational:
+                label = "ℹ️ "
+            elif not strict_mode:
+                label = "⚠️"
+            else:
+                label = "❌"
             print(f"{label} Case: {case.id}")
             print(f"  user_intent: {case.user_intent}")
             print(f"  action: {case.action}")
             print(f"  expected: {case.expected_decision}")
             print(f"  actual:   {decision.value}")
+            if total_n > 1:
+                print(f"  stability: {pass_n}/{total_n} pass ({stability})")
             if reason:
                 print(f"  reason:   {reason}")
             if case.expected_modified_params or modified_params:
@@ -492,8 +588,10 @@ def main() -> int:
     print(f"  skip:          {skip_count}")
     print(f"  pass:          {pass_count}")
     print(f"  fail:          {fail_count}")
+    if unstable_count:
+        print(f"  unstable:      {unstable_count}  (mixed pass/fail across repeated runs — nondeterminism, not a regression)")
     if inform_count:
-        print(f"  informational: {inform_count}  (PolicyEngine pass-through — IntentAlignment would decide)")
+        print(f"  informational: {inform_count}  (see breakdown below — not counted as fail)")
     if run_count > 0:
         print(f"  total time:    {total_time:.2f}s")
         print(f"  avg time/case: {total_time / run_count:.2f}s")
@@ -508,10 +606,21 @@ def main() -> int:
         for case_id in mismatches:
             print(f"  - {case_id}")
 
-    if inform_mismatches:
-        print("\nInformational (PolicyEngine pass-through — expected IntentAlignment to decide):")
-        for case_id in inform_mismatches:
+    if ia_passthrough_mismatches:
+        print("\nInformational — PolicyEngine pass-through (IntentAlignment would decide):")
+        for case_id in ia_passthrough_mismatches:
             print(f"  - {case_id}")
+
+    if pipeline_informational_mismatches:
+        print("\nInformational — pipeline_informational cases (expected_decision is authoritative only in "
+              "policy-engine mode; pipeline mismatch is tracked here, not counted as fail):")
+        for entry in pipeline_informational_mismatches:
+            print(f"  - {entry}")
+
+    if unstable_cases:
+        print("\nUnstable cases (mixed pass/fail across repeated runs — nondeterminism, not a regression):")
+        for case_id, pass_n, total_n in unstable_cases:
+            print(f"  - {case_id}: {pass_n}/{total_n} pass")
 
     if mode == "intent-alignment":
         print("\nNote: intent-alignment mode is exploratory; mismatches do not cause a nonzero exit status.")

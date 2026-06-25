@@ -37,7 +37,7 @@ class EnvironmentContext:
     Attributes:
         environment:          環境種別 ("production" | "staging" | "development" | ...)
         maintenance_windows:  定期メンテナンス窓の一覧
-        high_sensitivity:     True の場合、機微性の高い環境（教師側のリスク初期化を促進）
+        high_sensitivity:     True の場合、機微性の高い環境
         custom:               実装依存の任意フィールド
     """
     environment:         str                     = "production"

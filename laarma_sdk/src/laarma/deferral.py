@@ -10,7 +10,7 @@ SDK 方式では「エージェントの推論トレース・メモリ・保留�
 
 処理フロー:
   1. IntentAlignment が DEFER を返す
-  2. DeferralResolver が自後に追加コンテキストを仙8させて再評価を試みる
+  2. DeferralResolver が自律的に追加コンテキストを収集させて再評価を試みる
   3. 自律解決できた場合: ALLOW または DENY を返す
   4. 自律解決できない場合: STEP_UP に格上げして人間介入を要求
 """

@@ -2,7 +2,7 @@
 AARM 環境コンテキスト (E) — 仕様 IV-A2
 
 仕様の形式モデルにおける E (環境) を表現する。
-データストア・ API ・クラウドサービスの稿働状態、メンテナンス窓、環境種別などを保持する。
+データストア・ API ・クラウドサービスの稼働状態、メンテナンス窓、環境種別などを保持する。
 
 IntentAlignment は環境コンテキストを考慮して DEFER / STEP_UP を判断する。
 例: "定期メンテナンス窓外での認証情報ローテーション"→ E にメンテナンス窓がなければ DEFER。
@@ -37,7 +37,7 @@ class EnvironmentContext:
     Attributes:
         environment:          環境種別 ("production" | "staging" | "development" | ...)
         maintenance_windows:  定期メンテナンス窓の一覧
-        high_sensitivity:     True の場合、骸尲性の高い環境（教師側のリスク初期化を促進）
+        high_sensitivity:     True の場合、機微性の高い環境
         custom:               実装依存の任意フィールド
     """
     environment:         str                     = "production"

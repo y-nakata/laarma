@@ -136,14 +136,22 @@ class PolicyEngine:
         p = self._policy
 
         # 0. privilege_scope チェック — DENY は常に terminal
-        if action.identity and action.identity.privilege_scope:
-            if action.tool_name not in action.identity.privilege_scope:
-                return AuthorizationResult(
-                    decision=Decision.DENY,
-                    reason=f"'{action.tool_name}' は privilege_scope 外のツールです。",
-                    action=action,
-                    decision_source="privilege_scope",
-                )
+        # fail-closed: privilege_scope は ALLOW の明示的根拠（最小権限、仕様 R9）。
+        # identity が無い、または privilege_scope が未設定/空の主体は明示的根拠を持たないため DENY。
+        if not action.identity or not action.identity.privilege_scope:
+            return AuthorizationResult(
+                decision=Decision.DENY,
+                reason="privilege_scope が未設定のため、許可の明示的根拠がありません。",
+                action=action,
+                decision_source="privilege_scope",
+            )
+        if action.tool_name not in action.identity.privilege_scope:
+            return AuthorizationResult(
+                decision=Decision.DENY,
+                reason=f"'{action.tool_name}' は privilege_scope 外のツールです。",
+                action=action,
+                decision_source="privilege_scope",
+            )
 
         # 1. 絶対禁止ツールの判定 — DENY は常に terminal
         if action.tool_name in p.denied_tools:

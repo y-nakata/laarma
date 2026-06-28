@@ -158,7 +158,6 @@ class IntentAlignment:
                 "environment": "unknown",
                 "in_maintenance_window": None,
                 "maintenance_windows": [],
-                "high_sensitivity": False,
             },
             "proposed_action": {
                 "tool_name":  action.tool_name,

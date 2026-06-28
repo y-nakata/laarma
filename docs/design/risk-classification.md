@@ -15,7 +15,7 @@
 laarma は、アクションの危険性を**固定のツールリスク等級型**として持たない。代わりに、**アクセスしたデータと文脈から動的に把握する**。これを担うのは次の2つである。
 
 1. **`data_classification`**（派生シグナル δ の一つ） — アクセスしたデータの機密レベルを動的にラベル付けする。仕様準拠。
-2. **`destructive_tools` / `sensitive_tools`**（policy 上書き可能な集合） — データ分類とスコープ判定を補助するツール名の集合。
+2. **`destructive_tools` / `sensitive_tools` / `external_tools`**（policy 上書き可能な集合） — データ分類とスコープ判定を補助するツール名の集合。
 
 ## 1. AARM 仕様が定めること（§IV-C: 派生シグナル δ）
 
@@ -42,14 +42,15 @@ AARM の R2 は、コンテキスト蓄積 `Cn = Cn-1 ∪ {an, on, δn}` を要�
 
 判定は**アクションごとに動的**に行われ、結果は δ として蓄積され、IntentAlignment / DeferralResolver の評価材料になる。
 
-### destructive_tools / sensitive_tools: policy 上書き可能な補助集合
+### destructive_tools / sensitive_tools / external_tools: policy 上書き可能な補助集合
 
-`context_accumulator.py` はツール名の集合を2つ持つ:
+`context_accumulator.py` はツール名の集合を3つ持つ:
 
 - **`destructive_tools`** — 破壊的操作を行うツール名（デフォルト: `delete_file` / `drop_database` / `delete_all_records` / `execute_shell`）
 - **`sensitive_tools`** — 機密性の高い操作を行うツール名（デフォルト: `database` / `db` / `execute_shell` / `execute_sql`）
+- **`external_tools`** — 外部送信を行うツール名（デフォルト: `send_email` / `http_request` / `webhook` / `slack_message`）
 
-これらは **policy で上書き可能**である（`policy.destructive_tools` / `policy.sensitive_tools` が指定されればそれを使い、無ければデフォルト集合）。`sensitive_tools` は data_classification の `SENSITIVE_TOOL` ラベル付けに使われる。
+これらは **policy で上書き可能**である（`policy.destructive_tools` / `policy.sensitive_tools` / `policy.external_tools` が指定されればそれを使い、無ければデフォルト集合）。`sensitive_tools` は data_classification の `SENSITIVE_TOOL` ラベル付けに使われる。`external_tools` は `scope_expansion` 派生シグナルの判定（`_detect_scope_expansion()`）に使われる——「ツールが外部送信か」という宣言的分類であり、「意図がその送信を認可しているか」という意味判定とは役割が異なる。後者は IntentAlignment が担う。
 
 これらは「enum 型のリスク等級」ではなく、**データ分類とスコープ判定を補助する設定値**である点が重要。固定の3段階等級ではなく、運用ごとに調整できる集合として持つ。
 
@@ -73,7 +74,7 @@ laarma は、ツールごとに `READ_ONLY` / `WRITE` / `DESTRUCTIVE` のよう�
 
 ## 関連
 
-- `laarma_sdk/src/laarma/context_accumulator.py` の `_classify_data()`、`_DEFAULT_*` 集合、`_compute_confidence()`
-- `laarma_sdk/src/laarma/models.py` の `Policy`（`destructive_tools` / `sensitive_tools` / `pii_keywords` / `confidential_keywords` の上書きフィールド）
+- `laarma_sdk/src/laarma/context_accumulator.py` の `_classify_data()`、`_detect_scope_expansion()`、`_DEFAULT_*` 集合、`_compute_confidence()`
+- `laarma_sdk/src/laarma/policy_engine.py` の `Policy`（`destructive_tools` / `sensitive_tools` / `external_tools` / `pii_keywords` / `confidential_keywords` の上書きフィールド）
 - 提案/上書きモデル（PolicyEngine と IntentAlignment の関係）: [policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - README の仕様準拠状況: R2（コンテキスト蓄積）

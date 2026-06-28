@@ -22,6 +22,7 @@ _DEFAULT_PII_KEYWORDS      = frozenset({"email", "password", "phone", "address",
 _DEFAULT_CONFIDENTIAL_KEYS = frozenset({"secret", "token", "key", "credential", "private", "internal", "config"})
 _DEFAULT_SENSITIVE_TOOLS   = frozenset({"database", "db", "execute_shell", "execute_sql"})
 _DEFAULT_DESTRUCTIVE_TOOLS = frozenset({"delete_file", "drop_database", "delete_all_records", "execute_shell"})
+_DEFAULT_EXTERNAL_TOOLS    = frozenset({"send_email", "http_request", "webhook", "slack_message"})
 
 
 def _classify_data(
@@ -39,9 +40,8 @@ def _classify_data(
     return labels or ["PUBLIC"]
 
 
-def _detect_scope_expansion(user_intent: str, tool_name: str, parameters: dict) -> bool:
-    external = {"send_email", "http_request", "webhook", "slack_message"}
-    return tool_name in external and "send" not in user_intent.lower() and "email" not in user_intent.lower()
+def _detect_scope_expansion(user_intent: str, tool_name: str, parameters: dict, external_tools: frozenset[str]) -> bool:
+    return tool_name in external_tools and "send" not in user_intent.lower() and "email" not in user_intent.lower()
 
 
 def _extract_entities(tool_name: str, parameters: dict) -> set[str]:
@@ -112,6 +112,7 @@ class ContextAccumulator:
         self._confidential_keywords = (policy.confidential_keywords if policy and policy.confidential_keywords is not None else _DEFAULT_CONFIDENTIAL_KEYS)
         self._sensitive_tools      = (policy.sensitive_tools        if policy and policy.sensitive_tools       is not None else _DEFAULT_SENSITIVE_TOOLS)
         self._destructive_tools    = (policy.destructive_tools      if policy and policy.destructive_tools     is not None else _DEFAULT_DESTRUCTIVE_TOOLS)
+        self._external_tools       = (policy.external_tools         if policy and policy.external_tools        is not None else _DEFAULT_EXTERNAL_TOOLS)
 
     def record_action(self, action: Action) -> None:
         self._context.append_action(action)
@@ -127,7 +128,7 @@ class ContextAccumulator:
         self._semantic_distances.append(dist)
 
         expanded = _detect_scope_expansion(
-            self._context.user_intent, action.tool_name, action.parameters)
+            self._context.user_intent, action.tool_name, action.parameters, self._external_tools)
         self._scope_expansions.append(expanded)
 
         self._entity_set.update(_extract_entities(action.tool_name, action.parameters))

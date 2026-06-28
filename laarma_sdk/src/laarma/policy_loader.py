@@ -76,4 +76,5 @@ def load_policy(path: str | Path) -> Policy:
         confidential_keywords=_frozenset_or_none(dc.get("confidential_keywords")),
         sensitive_tools=_frozenset_or_none(dc.get("sensitive_tools")),
         destructive_tools=_frozenset_or_none(dc.get("destructive_tools")),
+        external_tools=_frozenset_or_none(dc.get("external_tools")),
     )

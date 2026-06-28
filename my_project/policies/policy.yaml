@@ -101,4 +101,9 @@ data_classification:
     - drop_database
     - delete_all_records
     - execute_shell
+  external_tools:
+    - send_email
+    - http_request
+    - webhook
+    - slack_message
 

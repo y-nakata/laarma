@@ -117,6 +117,11 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "破壊的操作とみなすツール名。context_accumulator での分類に使用。"
+        },
+        "external_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "外部送信とみなすツール名。context_accumulator の scope_expansion 判定に使用。"
         }
       }
     }

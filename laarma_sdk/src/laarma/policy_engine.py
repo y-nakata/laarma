@@ -85,6 +85,7 @@ class Policy:
     confidential_keywords: frozenset[str] | None = None
     sensitive_tools:       frozenset[str] | None = None
     destructive_tools:     frozenset[str] | None = None
+    external_tools:        frozenset[str] | None = None
 
 
 DEFAULT_POLICY = Policy(

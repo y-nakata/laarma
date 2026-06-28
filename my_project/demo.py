@@ -148,7 +148,6 @@ if __name__ == "__main__":
                               start_hour=2, end_hour=6,
                               days=["Sun"])
         ],
-        high_sensitivity=True,
     )
 
     # ステージング環境（メンテナンス窓内扱い）— 正常系で使用
@@ -159,7 +158,6 @@ if __name__ == "__main__":
                               start_hour=0, end_hour=24,
                               days=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
         ],
-        high_sensitivity=False,
     )
 
     # シナリオ 1: 正常系 — 意図に完全一致 → ALLOW

@@ -140,7 +140,6 @@ def build_environment(env: dict[str, Any]) -> EnvironmentContext:
     return EnvironmentContext(
         environment=env.get("environment", "production"),
         maintenance_windows=windows,
-        high_sensitivity=env.get("high_sensitivity", False),
         custom=env.get("custom", {}),
     )
 

@@ -37,12 +37,10 @@ class EnvironmentContext:
     Attributes:
         environment:          環境種別 ("production" | "staging" | "development" | ...)
         maintenance_windows:  定期メンテナンス窓の一覧
-        high_sensitivity:     True の場合、機微性の高い環境
         custom:               実装依存の任意フィールド
     """
     environment:         str                     = "production"
     maintenance_windows: list[MaintenanceWindow] = field(default_factory=list)
-    high_sensitivity:    bool                    = False
     custom:              dict[str, Any]          = field(default_factory=dict)
 
     def in_maintenance_window(self, dt: datetime | None = None) -> bool:
@@ -62,6 +60,5 @@ class EnvironmentContext:
                 }
                 for w in self.maintenance_windows
             ],
-            "high_sensitivity":       self.high_sensitivity,
             "custom":                 self.custom,
         }

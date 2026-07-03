@@ -46,7 +46,7 @@ AARM 仕様には存在しないコンポーネントであり、仕様の誤読
 
 ---
 
-## 2. 道A: LLM ベース IntentAlignment を除去し、決定層をポリシー評価エンジンにする
+## 2. 設計方針: LLM ベース IntentAlignment を除去し、決定層をポリシー評価エンジンにする
 
 laarma は AARM 仕様に忠実な実装を目指す（"Learning AARM Agent"）。したがって:
 
@@ -84,7 +84,7 @@ decision を出す LLM 判定（現行 IntentAlignment）は除去する。**
 ## 3. 現行 IntentAlignment の判定基準（条件1〜15）の移行先
 
 現行 `intent_alignment.py` の SYSTEM_PROMPT は、Decision Criteria として 15 個の判定基準を持つ
-（#94 で条件1〜15 として列挙済み）。道A では、これらを LLM の decision 判定から、δ のポリシー参照・
+（#94 で条件1〜15 として列挙済み）。組み替えでは、これらを LLM の decision 判定から、δ のポリシー参照・
 別 Issue・confidence（§5）に分解する。以下は棚卸しの結果で、実装・benchmark で再検証して訂正しうる。
 
 | 条件 | 現行の判定内容 | 移行先 |
@@ -168,7 +168,7 @@ DEFER トリガー (c) の confidence スコアは、論文では計算方法が
 これは AARM 仕様に反しない: semantic distance は式4 で定義されているが、confidence の計算方法は論文が未定義（実装依存）であり、そこに LLM を入れるのは仕様が空けている領域を埋めること。
 
 **多層防御として最初から入れる理由**: LLM がなければ `copy(src,src)` 型の意味論的矛盾は決定論の網をすり抜けて
-全て通ってしまう（fail-open の穴）。この穴を「道A 完成後に不足が観測されたら塞ぐ」と後回しにするのは、
+全て通ってしまう（fail-open の穴）。この穴を「後で不足が観測されたら塞ぐ」と後回しにするのは、
 気づいている fail-open を検証都合で放置することになり不適切。最初から confidence 計算に LLM を入れて
 fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の一層の限界であり、他の層（決定論ポリシー）が
 残っている。どの決定が決定論ルールで下され、どれが confidence 経由（LLM 検出含む）で下されたかを**受領書
@@ -180,37 +180,37 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 ---
 
-## 6. デモシナリオの再現性（道A の妥当性検証）
+## 6. デモシナリオの再現性（妥当性検証）
 
-現行デモは LLM の decision 判定に依存したシナリオを持つ。道A（distance + ポリシー + confidence）で
+現行デモは LLM の decision 判定に依存したシナリオを持つ。組み替え後（distance + ポリシー + confidence）で
 これらが再現できるかは、実装後 benchmark で確かめる:
 
 - **シナリオ4「読むだけ頼んだのにエージェントが delete_file 実行 → DENY」**: delete_file と元リクエスト（読む）の semantic distance が大きく出て、`distance > 閾値 → DENY`（条件1）で捉えられるはず。埋め込みが実際にこの距離を大きく算出するかが検証点。
 - **シナリオ8「"古いファイル"の定義が曖昧 → DEFER」**: "古い" の判断に confidence が低く出て DEFER になるはず。confidence 計算がこの曖昧さを低く算出するか（#77 の較正、および §5 の LLM 活用）が検証点。
 - シナリオ5（PII 削除 → STEP_UP）、シナリオ7（危険パス → MODIFY）等、静的ルール・data_classification で決まるものは、LLM の decision 除去の影響を受けにくい（元々ポリシー側）。
 
-再現できない場合、その具体的な不足が、将来的な追加設計（下記）を検討する根拠になる。
+再現できない場合、その具体的な不足が、将来的な追加設計（§7）を検討する根拠になる。
 
 ---
 
-## 7. 将来的な LLM 補完（道A で不足が観測された場合）
+## 7. 将来的な LLM 補完（実装後に不足が観測された場合）
 
-§5 の多層防御（confidence 計算への LLM 活用）を入れてもなお、道A で捉えられない意味判断が**具体的に
+§5 の多層防御（confidence 計算への LLM 活用）を入れてもなお、捉えられない意味判断が**具体的に
 観測された場合**に、追加の LLM 活用を検討する余地がある。これは AARM 仕様外の laarma 独自拡張として、
 仕様外であることを明示して持つ。現時点で想定シナリオを先回りで記述はしない（根拠のない想定を固定する危険がある）。
-道A を動かして観測された不足を、そのとき具体的事実として将来 Issue に記録する。
+実装を動かして観測された不足を、そのとき具体的事実として将来 Issue に記録する。
 
 ---
 
 ## 8. この設計が触る範囲
 
-道A の実装は #94（signal/decision 分離）の本体であり、規模が大きい。実装ブリーフは本メモを土台に別途作成する。
+本設計の実装は #94（signal/decision 分離）の本体であり、規模が大きい。実装ブリーフは本メモを土台に別途作成する。
 
 触るコンポーネント（概略）:
 - **除去**: `intent_alignment.py` の decision 判定 LLM、`policy_engine.py` の `_confirm_with_ia` 提案/上書き構造。
 - **活かす**: `distance_calculator.py`、Context Accumulator の δ 産出。
 - **拡張**: `_match_conditions`（δ 参照、#107）、ポリシー評価を priority 解決の (a,C) 評価エンジンに。confidence 計算への LLM 活用（§5）。
-- **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は道A で大きく変わるため、実装時に見直す。
+- **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計で大きく変わるため、実装時に見直す。
 
 実装時の規律（#94 で確立）: 統合すべきもの（confidence の入口写像・DEFER トリガー・δ のポリシー参照）を切り離さない / 条件1〜15 の移行を benchmark で検証しながら実装する / 危険性を confidence に混ぜない。
 
@@ -231,6 +231,6 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 - 論文解釈の土台: [docs/aarm/classification-and-policy-model.md](../aarm/classification-and-policy-model.md)（Table I・Policy Structure・測定と評価の二段）、[docs/aarm/deferral.md](../aarm/deferral.md)（DEFER トリガーの FRAMEWORK/CONFORMANCE 不整合・confidence 解釈）
 - AARM 論文 arXiv:2602.09433: 式2（Context Accumulation）、式3（Policy Structure）、式4（semantic distance）、R3・R7、§IV-B-4（FRAMEWORK 章 DEFER）、§IV-C、Contribution 2
-- 現行の提案/上書きモデル（道A で見直す対象）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
+- 現行の提案/上書きモデル（本設計で見直す対象）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
-- 関連 Issue: #94（signal/decision 分離 = 道A の本体）、#107（match 条件の δ 参照拡張）、#99（scope_expansion）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）
+- 関連 Issue: #94（signal/decision 分離 = 本設計の本体）、#107（match 条件の δ 参照拡張）、#99（scope_expansion）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

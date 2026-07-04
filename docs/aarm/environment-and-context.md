@@ -152,15 +152,15 @@ E は二つの役割を負う。
 
 > Like memory poisoning, environmental manipulation requires complementary infrastructure-level protections beyond AARM's session-level controls.
 
-### 【解釈】三策のうち二つは (a, C) では実現できず、AARM 機構内の対策として提示するのは不整合
+### 【解釈】三策はいずれも (a, C) 上の機構ではなく、(1)(2) の AARM への帰属だけが不整合として残る
 
-三策を (a, C) の入力可能性に照らして分ける。
+三策はすべて "AARM Partial Mitigation" の見出しの下にあり、論文はこれらを AARM の部分的対策として同格に帰属している。どれが AARM でどれがインフラ側かを論文自身は区別していない。区別するのは本メモの解釈であり、その物差しは一つ——「これは (a, C) 上で評価できる機構か」である。この物差しでは三策はいずれも (a, C) 上の機構ではない。ただし (a, C) を超える仕方が二種類に分かれる。
 
 - **(1) input provenance tracking → 環境入力の期待ベースライン逸脱検出**: この策の重心は mechanism 名の provenance tracking ではなく、それが目的とする "enabling detection when environmental inputs deviate from expected baselines" にある。provenance tracking そのもの（エージェントが処理するデータの source と integrity を記録する）は、処理した出力 o の来歴を残すセッションレベルの操作として読む余地があり、それだけなら (a, C) 内で完結しうる。不整合を負っているのは目的節の方である。逸脱検出は、E の期待状態のベースラインを保持し、現在の環境入力をそれと突き合わせることを要する。(a, C) は E の状態のベースラインを持たず、§4 の通り環境データは実行済み read アクションの出力 o として入るのみで、逸脱判定に要する「期待される E の状態」は (a, C) の外にある。したがって逸脱検出は (a, C) では実現できない。
 - **(2) anomaly detection on environmental state**: 「環境状態の予期しない変化を検出する」。これは E の状態を読み、その変化を追うことを直接要求する。§3 の通り (a, C) に E の状態を読む経路はない。δ の semantic distance / scope expansion はエージェントの行為系列に対するセッション由来の信号であって、E の状態の観測ではない。
-- **(3) environment sandboxing**: 「エージェントが authoritative として扱う環境データの範囲を限定する」。これはインフラ側の境界制御であり、(a, C) 上のポリシー評価ではない。これは正しく AARM 機構の外にある。
+- **(3) environment sandboxing**: 「エージェントが authoritative として扱う環境データの範囲を限定する」。これはそもそも (a, C) 上のポリシー評価ではなく、その範囲を外側から限定するインフラ境界制御である。これを「インフラ側」と切り分けるのは論文が明示する区別ではなく本メモの解釈だが、その解釈は末尾の admission sentence が挙げる complementary infrastructure-level protections に対応する。
 
-すなわち (3) はインフラ側として整合するが、(1)(2) は E の入力・状態の観測を前提としており、(a, C) では実現できない。にもかかわらず論文はこれらを "AARM Partial Mitigation" の見出しの下に、AARM 機構自身の対策として提示している。末尾の "requires complementary infrastructure-level protections beyond AARM's session-level controls" は限界を認めてはいるが、(1)(2) を AARM の session-level 対策として帰属させたまま補足するにとどまり、帰属の誤りを解消していない。これは §1–§5 で記述した「E は (a, C) の入力ではない」という不整合が、脅威モデルの低減策記述に同型で再出現したものである。
+物差しの帰結はこうである。末尾の "requires complementary infrastructure-level protections beyond AARM's session-level controls" は (3) を覆う——(3) はそこで言う infra 側の対策そのものだからである。しかし同じ admission sentence は (1)(2) を覆わない。(1)(2) は infra 境界制御ではなく、システムが行う「検出（detection / flags）」として提示されており、それでいて E の観測を要するため (a, C) では実行できない。infra 側にも属さず (a, C) でも実行できない (1)(2) が "AARM Partial Mitigation" として AARM に帰属させられている——これが §1–§5 の「E は (a, C) の入力ではない」不整合の、脅威モデルにおける同型の再出現である。(3) は不整合の証拠ではなく、admission sentence が整合的に回収する側の例にすぎない。
 
 ---
 

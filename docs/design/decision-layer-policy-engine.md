@@ -71,7 +71,7 @@ decision を出す LLM 判定（現行 IntentAlignment）は除去する。**
 
 - **活かす**: `distance_calculator.py`（semantic distance の埋め込み計算 = 式4。既に LLM を使わずコードで実装済み。コサイン類似度と `1 - cosine` の距離変換を numpy で計算）。Context Accumulator の δ 産出。
 - **除去する**: `intent_alignment.py` の「decision を出す LLM 判定」（(a,C) を LLM に渡して ALLOW/DENY/… を得る部分）。`_confirm_with_ia` の提案/上書き構造。
-- **新設・拡張する**: ポリシーの match predicate が δ（semantic distance・data_classification・confidence 等）を参照できるようにする（#107 の δ 参照拡張が前提）。δ を閾値/集合で参照するポリシーが、現行 LLM が担っていた判定の大半を代替する。加えて、confidence 計算への LLM 活用（§5）。
+- **新設・拡張する**: ポリシーの match predicate が δ（semantic distance・data_classification・confidence 等）を参照できるようにする（match predicate の δ 参照は本リファクタの中核機構で、骨格ができた段階でデモポリシー需要駆動に段階実装する。旧 #107 は本リファクタに吸収）。δ を閾値/集合で参照するポリシーが、現行 LLM が担っていた判定の大半を代替する。加えて、confidence 計算への LLM 活用（§5）。
 
 ### 処理順序の転換
 
@@ -105,7 +105,7 @@ decision を出す LLM 判定（現行 IntentAlignment）は除去する。**
 | 14 | 本番の高影響操作 | environment=production + destructive のポリシー参照 → STEP_UP（危険性軸の SDK 固定写像） |
 | 15 | confidence 0.4-0.6 かつ中程度リスク | confidence のポリシー参照（`0.4 < confidence < 0.6 → STEP_UP`） |
 
-移行先はおおむね三つに分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,5,6,7,8,10,13,14,15。#107 の δ 参照拡張が前提）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9,11）。廃止は条件 12。
+移行先はおおむね三つに分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,5,6,7,8,10,13,14,15。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9,11）。廃止は条件 12。
 
 ---
 
@@ -204,12 +204,12 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 ## 8. この設計が触る範囲
 
-本設計の実装は #94（signal/decision 分離）の本体であり、規模が大きい。実装ブリーフは本メモを土台に別途作成する。
+本設計の実装は #112（#94 後継）の本体であり、規模が大きい。実装ブリーフは本メモを土台に別途作成する。
 
 触るコンポーネント（概略）:
 - **除去**: `intent_alignment.py` の decision 判定 LLM、`policy_engine.py` の `_confirm_with_ia` 提案/上書き構造。
 - **活かす**: `distance_calculator.py`、Context Accumulator の δ 産出。
-- **拡張**: `_match_conditions`（δ 参照、#107）、ポリシー評価を priority 解決の (a,C) 評価エンジンに。confidence 計算への LLM 活用（§5）。
+- **拡張**: `_match_conditions`（δ 参照。本リファクタ内で需要駆動に段階実装、旧 #107 吸収）、ポリシー評価を priority 解決の (a,C) 評価エンジンに。confidence 計算への LLM 活用（§5）。
 - **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計で大きく変わるため、実装時に見直す。
 
 実装時の規律（#94 で確立）: 統合すべきもの（confidence の入口写像・DEFER トリガー・δ のポリシー参照）を切り離さない / 条件1〜15 の移行を benchmark で検証しながら実装する / 危険性を confidence に混ぜない。
@@ -223,7 +223,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。現行の提案/上書きモデル（除去対象として現存）。
 - **設計のみ・未実装**: 決定層のポリシー評価エンジン化、LLM decision 判定の除去、条件1〜15 の移行対応、DEFER トリガーの FRAMEWORK/CONFORMANCE 統合、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。
 - **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さ・矛盾を低く算出するか。
-- **他 Issue 依存**: δ 参照ポリシー（#107）、confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。
+- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。
 
 ---
 
@@ -233,4 +233,4 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - AARM 論文 arXiv:2602.09433: 式2（Context Accumulation）、式3（Policy Structure）、式4（semantic distance）、R3・R7、§IV-B-4（FRAMEWORK 章 DEFER）、§IV-C、Contribution 2
 - 現行の提案/上書きモデル（本設計で見直す対象）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
-- 関連 Issue: #94（signal/decision 分離 = 本設計の本体）、#107（match 条件の δ 参照拡張）、#99（scope_expansion）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）
+- 関連 Issue: #112（本設計の実装。#94 後継）、#94（signal/decision 分離。#112 に立て直し・not_planned クローズ）、#107（δ 参照拡張。#112 に吸収・not_planned クローズ）、#99（scope_expansion）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

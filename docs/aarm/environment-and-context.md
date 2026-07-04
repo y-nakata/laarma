@@ -5,7 +5,7 @@
 > **この文書の位置づけ**: これは **AARM 論文（外部仕様）が何を言っているか**を読み解く解釈メモである。
 > laarma 自身の設計判断は書かない（それは `docs/design/` の役割で、そちらから本メモを参照する）。
 > 本メモは、AARM 論文が環境 E をどう定義し、それを評価タプル (a, C) にどう通している（いない）かを読み解いたもの。
-> 論文の Action Classification（Context-Dependent Defer の例）と形式モデル（式2・式3）の間の不整合を指摘し、
+> 論文の Action Classification（Context-Dependent Defer の例）および脅威モデル（V.C.4）と形式モデル（式2・式3）の間の不整合を指摘し、
 > #87（環境条件を含む判定条件をどう扱うか）の前提を問い直す土台となる。
 >
 > **記述の区別**: 本メモは二種類の記述を**恒久的に区別**する。
@@ -24,7 +24,7 @@
 
 ## 主張（要約）
 
-AARM は環境 E に二つの役割を負わせているが、両者を調停していない。形式モデル（式2・式3）は E を評価入力から締め出す一方、Action Classification の Context-Dependent Defer の例は E の運用状態を判定変数として参照している。この未調停により、論文自身が挙げた Defer の例は、論文の形式化に準拠した実装では記述通りに実現できない。
+AARM は環境 E に二つの役割を負わせているが、両者を調停していない。形式モデル（式2・式3）は E を評価入力から締め出す一方、Action Classification の Context-Dependent Defer の例は E の運用状態を判定変数として参照している。この未調停により、論文自身が挙げた Defer の例は、論文の形式化に準拠した実装では記述通りに実現できない。同じ入力チャネル不在は脅威モデル（V.C.4 Environmental Manipulation）の "AARM Partial Mitigation" にも同型で現れる。環境状態の観測を前提とする低減策（input provenance tracking、environmental state の anomaly detection）が AARM 機構自身の対策として提示されており、これも不整合である。
 
 ---
 
@@ -140,7 +140,31 @@ E は二つの役割を負う。
 
 ---
 
-## 6. #87 との接続
+## 6. 脅威モデルにも同じ入力チャネル不在が現れる（V.C.4 Environmental Manipulation）
+
+### 【論文】Environmental Manipulation と "AARM Partial Mitigation"（V.C.4）
+
+脅威 Environmental Manipulation は、敵対者が環境（ファイル・API 応答・設定状態・データベースレコード）を改変し、エージェントがそれを ground truth として処理することで、偽の前提に基づく行動を誘発するものと定義される。論文はこれに対する AARM の部分的低減策（"AARM Partial Mitigation"）として三つを挙げる:
+
+> Input provenance tracking records the source and integrity of data the agent processes, enabling detection when environmental inputs deviate from expected baselines. Anomaly detection flags unexpected changes in environmental state, and environment sandboxing can limit the scope of environmental data the agent treats as authoritative.
+
+そのうえで限界を認める:
+
+> Like memory poisoning, environmental manipulation requires complementary infrastructure-level protections beyond AARM's session-level controls.
+
+### 【解釈】三策のうち二つは (a, C) では実現できず、AARM 機構内の対策として提示するのは不整合
+
+三策を (a, C) の入力可能性に照らして分ける。
+
+- **(1) input provenance tracking**: 目的は「環境入力が期待ベースラインから逸脱したときに検出する」こと。これは環境入力を捕捉し、E の期待状態のベースラインと突き合わせることを要する。(a, C) が保持するのは data classification（δ 信号）等のセッション由来情報であり、E の状態のベースラインも、環境入力の provenance/integrity を独立に検証する経路も持たない。§4 の通り、環境データは実行済み read アクションの出力 o として入るのみで、逸脱判定に要する「期待される E の状態」は (a, C) の外にある。
+- **(2) anomaly detection on environmental state**: 「環境状態の予期しない変化を検出する」。これは E の状態を読み、その変化を追うことを直接要求する。§3 の通り (a, C) に E の状態を読む経路はない。δ の semantic distance / scope expansion はエージェントの行為系列に対するセッション由来の信号であって、E の状態の観測ではない。
+- **(3) environment sandboxing**: 「エージェントが authoritative として扱う環境データの範囲を限定する」。これはインフラ側の境界制御であり、(a, C) 上のポリシー評価ではない。これは正しく AARM 機構の外にある。
+
+すなわち (3) はインフラ側として整合するが、(1)(2) は E の入力・状態の観測を前提としており、(a, C) では実現できない。にもかかわらず論文はこれらを "AARM Partial Mitigation" の見出しの下に、AARM 機構自身の対策として提示している。末尾の "requires complementary infrastructure-level protections beyond AARM's session-level controls" は限界を認めてはいるが、(1)(2) を AARM の session-level 対策として帰属させたまま補足するにとどまり、帰属の誤りを解消していない。これは §1–§5 で記述した「E は (a, C) の入力ではない」という不整合が、脅威モデルの低減策記述に同型で再出現したものである。
+
+---
+
+## 7. #87 との接続
 
 ### 【解釈】#87 の「環境という文脈を見ている」という解釈は接地を誤っていた
 
@@ -150,7 +174,7 @@ E は二つの役割を負う。
 
 ## 関連
 
-- AARM 論文 arXiv:2602.09433: §IV-A-2（Formal Model、環境 E の定義）、§IV-A-4（Execution Effects、出力 o と影響 e）、§IV-B-4（Context-Dependent Defer とその例）、式2（Context Accumulation）、式3（Policy Structure）、§IV-C（派生信号 δ）
+- AARM 論文 arXiv:2602.09433: §IV-A-2（Formal Model、環境 E の定義）、§IV-A-4（Execution Effects、出力 o と影響 e）、§IV-B-4（Context-Dependent Defer とその例）、式2（Context Accumulation）、式3（Policy Structure）、§IV-C（派生信号 δ）、§V-C-4（Environmental Manipulation と AARM Partial Mitigation）
 - 同ディレクトリ: [`classification-and-policy-model.md`](./classification-and-policy-model.md)（Table I とポリシー評価モデル。match predicate が参照できる範囲を扱う）、[`deferral.md`](./deferral.md)（DEFER トリガー R3 と FRAMEWORK/CONFORMANCE 章の食い違い。E 依存の Defer は confidence 不足による保留と地続き）
 - laarma の設計判断（本メモを土台とする）: `docs/design/`（環境前提をどう扱うか——session-derived に閉じる／観測アクションを定義して o に載せる／評価タプルか δ を環境状態で拡張する、の選択）
 - 関連 Issue: #87（環境条件を含む判定条件の扱い）、#94（IA の signal/decision 分離）、#107（match 条件で δ を参照できるようにする拡張）

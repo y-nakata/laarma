@@ -138,6 +138,12 @@ E は二つの役割を負う。
 
 式2・式3は形式体系として内部で一貫しており、そこから P ∧ ¬P が導けるわけではない。問題は形式体系の内部にあるのではなく、非形式的な Action Classification（E 依存の Defer を認める）と形式モデル（E を評価入力から締め出す）の間にある。両者は調停されておらず、論文はこの不整合を自覚せず放置している。正確には「未調停の二役と、それに起因する実現不能な例」であり、本メモはこれを不整合と呼ぶ。震源は形式側の破綻ではなく、例が装置の入力表現力を超えて環境識別子を判定変数として語っている点にある。
 
+### 【解釈】E の除外は意図的な線引きの可能性があり、その場合も例の勇み足は残る
+
+E を評価タプル (a, C) から外したことは、論文の見落としではなく意図的な線引きである可能性がある。環境要件は E ごとに固有で、汎用仕様として——任意の E に通用する有限の信号集合として——(a, C) に定式化して畳み込むことはできない（特定の E に固定すればその環境要件は定式化できるが、それは汎用仕様ではない）。もし AARM が最初から「session 由来で汎用に定式化できる信号（δ 等）のみを評価対象とし、環境状態に応じて実行を許可／拒否する制御は AARM の外（インフラ）に委ねる」という設計思想を採っていたなら、E を評価入力から外すのは一貫した選択になる。§6 で見た V.C.4 の admission sentence「requires complementary infrastructure-level protections beyond AARM's session-level controls」は、この役割分担——session-level に汎用定式化できるものだけを AARM が持ち、環境依存はインフラへ——と整合する。
+
+ただし論文はこの意図を明記しておらず、これは本メモの解釈である。そしてこの読みを採っても、§2 の Context-Dependent Defer の例（メンテナンスウィンドウ外）が残す問題は消えない。E を意図的に外したのであれば、判定を分ける例に環境識別子を使ったこと自体が線を踏み越えている。したがってこの読みは不整合を解消するのではなく、その性格を変える——「E を入力に通し忘れた」不整合から、「E を意図的に外したのに例だけがその線を越えている」不整合へ。震源が形式側の抜けから例の勇み足へ寄り、これは本節前段の記述（震源は例が装置の入力表現力を超えて環境識別子を判定変数として語っている点）と整合する。
+
 ---
 
 ## 6. 脅威モデルにも同じ入力チャネル不在が現れる（V.C.4 Environmental Manipulation）
@@ -176,5 +182,5 @@ E は二つの役割を負う。
 
 - AARM 論文 arXiv:2602.09433: §IV-A-2（Formal Model、環境 E の定義）、§IV-A-4（Execution Effects、出力 o と影響 e）、§IV-B-4（Context-Dependent Defer とその例）、式2（Context Accumulation）、式3（Policy Structure）、§IV-C（派生信号 δ）、§V-C-4（Environmental Manipulation と AARM Partial Mitigation）
 - 同ディレクトリ: [`classification-and-policy-model.md`](./classification-and-policy-model.md)（Table I とポリシー評価モデル。match predicate が参照できる範囲を扱う）、[`deferral.md`](./deferral.md)（DEFER トリガー R3 と FRAMEWORK/CONFORMANCE 章の食い違い。E 依存の Defer は confidence 不足による保留と地続き）
-- laarma の設計判断（本メモを土台とする）: `docs/design/`（環境前提をどう扱うか——session-derived に閉じる／観測アクションを定義して o に載せる／評価タプルか δ を環境状態で拡張する、の選択）
-- 関連 Issue: #87（環境条件を含む判定条件の扱い）、#94（IA の signal/decision 分離）、#107（match 条件で δ を参照できるようにする拡張）
+- laarma の設計判断（本メモを土台とする）: [`../design/environment-demo-fiction.md`](../design/environment-demo-fiction.md)（環境要件を汎用仕様として定式化せず、AS IS の環境条件をデモフィクションとして踏襲する判断。#110）
+- 関連 Issue: #87（環境条件を含む判定条件の扱い）、#94（IA の signal/decision 分離）、#107（match 条件で δ を参照できるようにする拡張）、#110（環境要件を参照するポリシーをどう受けるか）

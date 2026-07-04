@@ -24,7 +24,7 @@
 
 ## 主張（要約）
 
-AARM は環境 E に二つの役割を負わせているが、両者を調停していない。形式モデル（式2・式3）は E を評価入力から締め出す一方、Action Classification の Context-Dependent Defer の例は E の運用状態を判定変数として参照している。この未調停により、論文自身が挙げた Defer の例は、論文の形式化に準拠した実装では記述通りに実現できない。同じ入力チャネル不在は脅威モデル（V.C.4 Environmental Manipulation）の "AARM Partial Mitigation" にも同型で現れる。環境状態の観測を前提とする低減策（input provenance tracking、environmental state の anomaly detection）が AARM 機構自身の対策として提示されており、これも不整合である。
+AARM は環境 E に二つの役割を負わせているが、両者を調停していない。形式モデル（式2・式3）は E を評価入力から締め出す一方、Action Classification の Context-Dependent Defer の例は E の運用状態を判定変数として参照している。この未調停により、論文自身が挙げた Defer の例は、論文の形式化に準拠した実装では記述通りに実現できない。同じ入力チャネル不在は脅威モデル（V.C.4 Environmental Manipulation）の "AARM Partial Mitigation" にも同型で現れる。E の期待状態のベースラインを保持し現在の環境入力との逸脱を検出する低減策（enabling detection when environmental inputs deviate from expected baselines）、および environmental state の anomaly detection——いずれも E の状態の観測を前提とする——が AARM 機構自身の対策として提示されており、これも不整合である。
 
 ---
 
@@ -156,7 +156,7 @@ E は二つの役割を負う。
 
 三策を (a, C) の入力可能性に照らして分ける。
 
-- **(1) input provenance tracking**: 目的は「環境入力が期待ベースラインから逸脱したときに検出する」こと。これは環境入力を捕捉し、E の期待状態のベースラインと突き合わせることを要する。(a, C) が保持するのは data classification（δ 信号）等のセッション由来情報であり、E の状態のベースラインも、環境入力の provenance/integrity を独立に検証する経路も持たない。§4 の通り、環境データは実行済み read アクションの出力 o として入るのみで、逸脱判定に要する「期待される E の状態」は (a, C) の外にある。
+- **(1) input provenance tracking → 環境入力の期待ベースライン逸脱検出**: この策の重心は mechanism 名の provenance tracking ではなく、それが目的とする "enabling detection when environmental inputs deviate from expected baselines" にある。provenance tracking そのもの（エージェントが処理するデータの source と integrity を記録する）は、処理した出力 o の来歴を残すセッションレベルの操作として読む余地があり、それだけなら (a, C) 内で完結しうる。不整合を負っているのは目的節の方である。逸脱検出は、E の期待状態のベースラインを保持し、現在の環境入力をそれと突き合わせることを要する。(a, C) は E の状態のベースラインを持たず、§4 の通り環境データは実行済み read アクションの出力 o として入るのみで、逸脱判定に要する「期待される E の状態」は (a, C) の外にある。したがって逸脱検出は (a, C) では実現できない。
 - **(2) anomaly detection on environmental state**: 「環境状態の予期しない変化を検出する」。これは E の状態を読み、その変化を追うことを直接要求する。§3 の通り (a, C) に E の状態を読む経路はない。δ の semantic distance / scope expansion はエージェントの行為系列に対するセッション由来の信号であって、E の状態の観測ではない。
 - **(3) environment sandboxing**: 「エージェントが authoritative として扱う環境データの範囲を限定する」。これはインフラ側の境界制御であり、(a, C) 上のポリシー評価ではない。これは正しく AARM 機構の外にある。
 

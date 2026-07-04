@@ -13,7 +13,7 @@
 
 ## 方針（要約）
 
-laarma は、環境要件（本番か否か、メンテナンスウィンドウ内外か等）を参照するポリシーを、**汎用の (a, C, E) 仕様として定式化しない**。現行 `policy_engine.py` の環境条件（`EnvironmentContext` 引数、`environment_type` / `not_in_maintenance_window`）は、撤去も汎用化もせず、**デモフィクションとして明示的に踏襲する**。実運用の環境ゲーティングは AARM/laarma の外（インフラ）の領分である。
+laarma は、環境要件（本番か否か、メンテナンスウィンドウ内外か等）を参照するポリシーを、**汎用の (a, C, E) 仕様として定式化しない**。現行 `policy_engine.py` の環境条件（`EnvironmentContext` 引数、`environment_type` / `not_in_maintenance_window`）は、撤去も汎用化もせず、**デモフィクションとして明示的に踏襲する**。実運用で環境状態に応じて実行を許可／拒否する制御は AARM/laarma の外（インフラ）の領分である。
 
 ## 1. AARM 仕様が定めること
 
@@ -39,7 +39,7 @@ AARM のポリシーは π:(a, C)（式3）。環境 E は評価入力ではな�
 
 ### 汎用仕様としての環境要件 E は定式化しない
 
-環境要件は E ごとに固有で、任意の E に通用する有限の信号集合として汎用に定式化できない。特定システムに特化すればその環境要件は定式化可能だが、laarma でそれをやる動機はない。laarma は特定システム向けの環境ゲーティング製品ではなく、AARM の (a, C) 評価を実装するプロトタイプである。
+環境要件は E ごとに固有で、任意の E に通用する有限の信号集合として汎用に定式化できない。特定システムに特化すればその環境要件は定式化可能だが、laarma でそれをやる動機はない。laarma は特定システムの環境要件に特化した実行制御の製品ではなく、AARM の (a, C) 評価を実装するプロトタイプである。
 
 ### 撤去もしない
 
@@ -49,9 +49,9 @@ AARM のポリシーは π:(a, C)（式3）。環境 E は評価入力ではな�
 
 撤去も汎用化もせず、現状を**デモフィクション**として明示的にラベルして踏襲する。これにより、AS IS の (a, C, E) が「汎用の環境評価能力」の主張と取り違えられることを防ぐ。AS IS の (a, C, E) は AARM (a, C) からの逸脱として残るが、汎用能力を主張するものではない。
 
-### 実運用の環境ゲーティングはインフラの領分
+### 実運用の環境依存の実行制御はインフラの領分
 
-実運用で環境依存のゲーティングが要るなら、それは AARM/laarma の外（インフラ）で行う。これは `docs/aarm/environment-and-context.md` §6 が読み解いた V.C.4 の admission sentence（環境操作対策は AARM の session-level 制御を超える complementary infrastructure-level protections を要する）と整合する。
+実運用で環境状態に応じて実行を許可／拒否する制御が要るなら、それは AARM/laarma の外（インフラ）で行う。これは `docs/aarm/environment-and-context.md` §6 が読み解いた V.C.4 の admission sentence（環境操作対策は AARM の session-level 制御を超える complementary infrastructure-level protections を要する）と整合する。
 
 ## 関連
 

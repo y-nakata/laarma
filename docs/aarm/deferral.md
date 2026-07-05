@@ -141,6 +141,24 @@ R3（トリガー）と R4（DEFER 後）を合わせると、DEFER は二段に
 「入口で δ による危険性の細分をせず、解決フェーズに委ねる」という設計は、この分離に沿う
 （[classification-and-policy-model.md](classification-and-policy-model.md) §5 の「測定と評価の二段」とも整合）。
 
+### 【解釈】DEFER の解決先は DEFER を含まない
+
+R4 の解決要件から、**DEFER の解決先は {ALLOW, DENY, STEP_UP} に収束し、再び DEFER にはならない**、と読める。
+
+根拠は上記【論文】の R4 要件である。R4 は cascading deferral を有界にすること（並行 deferred アクションが
+設定上限を超えたら以降を DENY、無限に deferred 状態を溜めない）を MUST で求め、列挙される解決経路
+（十分なコンテキスト収集／追加検証／safe constraints の適用 → 実行、または timeout → DENY）に DEFER への
+回帰を含まない。「DEFER を解決したらまた DEFER」という再帰は、この bound の精神に反する。
+
+ただし論文は DEFER の解決先を {ALLOW, DENY, STEP_UP} に明示的に限定して列挙しているわけではない——これは
+R4 の要件（cascading bound・timeout→DENY・列挙された解決経路）からの読みであって、論文の逐語的な記述では
+ない。したがって【論文】ではなく【解釈】として置く。
+
+（laarma の実装がこの読みをどう担保するか——DeferralResolver が解決先を ALLOW/DENY/STEP_UP に限定し、
+それ以外が返った場合は STEP_UP にフォールバックするガードを持つ——は設計・実装側の話であり
+`docs/design/` および実装が扱う。本メモは「R4 の解決要件から、DEFER の解決先は DEFER を含まないと読める」
+という論文の読みだけを記録する。）
+
 ---
 
 ## 関連

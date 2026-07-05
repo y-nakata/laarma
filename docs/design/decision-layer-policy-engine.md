@@ -211,6 +211,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - **活かす**: `distance_calculator.py`、Context Accumulator の δ 産出。
 - **拡張**: `_match_conditions`（δ 参照。本リファクタ内で需要駆動に段階実装、旧 #107 吸収）、ポリシー評価を priority 解決の (a,C) 評価エンジンに。confidence 計算への LLM 活用（§5）。
 - **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計で大きく変わるため、実装時に見直す。
+- **温存（本設計では触らない）**: `max_actions`（回数上限による運用バックストップ。ゴールに近づかないまま動作を継続する状態＝intent drift 的な暴走を、drift 検出機構が無い現状で回数によって粗く肩代わりして止める。AARM の (a, C) 意図評価とは無関係の運用ガードであり、本物の drift 検出〔δ の distance drift / scope_expansion、#99〕が入れば役割はそちらへ移る。現状 benchmark ではどのケースも閾値〔既定 50〕に届かず休眠）。
 
 実装時の規律（#94 で確立）: 統合すべきもの（confidence の入口写像・DEFER トリガー・δ のポリシー参照）を切り離さない / 条件1〜15 の移行を benchmark で検証しながら実装する / 危険性を confidence に混ぜない。
 

@@ -5,7 +5,7 @@ STEP_UP は「自律的に ALLOW/DENY に決定できない、人間の判断が
 DeferralResolver（DEFER の自律解決）と対称的な位置づけ。
 
 処理フロー:
-  1. PolicyEngine または IntentAlignment が STEP_UP を返す
+  1. PolicyEngine が STEP_UP を返す
   2. StepUpResolver が承認者にエスカレーション（コンソール等）
   3. 承認: ALLOW を返す → ツール実行へ
   4. 拒否: DENY を返す → ToolBlocked 例外へ
@@ -52,6 +52,7 @@ class StepUpResolver:
                 modified_params=step_up_result.modified_params,
                 resolution_method="human_approved",
                 resolution_timestamp=datetime.now(timezone.utc),
+                decision_source="step_up_resolver",
             )
         return AuthorizationResult(
             decision=Decision.ALLOW if approved else Decision.DENY,
@@ -59,4 +60,5 @@ class StepUpResolver:
             action=action,
             resolution_method="human_approved" if approved else "human_denied",
             resolution_timestamp=datetime.now(timezone.utc),
+            decision_source="step_up_resolver",
         )

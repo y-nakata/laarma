@@ -62,7 +62,7 @@
     },
     "rules": {
       "type": "array",
-      "description": "追加の静的ルール。PolicyEngine が順番に評価し、最初にマッチしたものを適用する。",
+      "description": "追加の静的ルール。PolicyEngine は全マッチするルールを収集し、最も高い priority のルールを適用する（同一 priority で decision が競合する場合は DEFER）。",
       "items": {
         "type": "object",
         "required": ["id", "decision", "reason"],
@@ -74,7 +74,7 @@
           },
           "decision": {
             "type": "string",
-            "enum": ["DENY", "DEFER", "MODIFY"],
+            "enum": ["ALLOW", "DENY", "DEFER", "MODIFY", "STEP_UP"],
             "description": "条件一致時に返す決定。"
           },
           "reason": {
@@ -89,6 +89,10 @@
               "enum": ["basename", "to_relative"]
             },
             "description": "MODIFY 時のパラメータ変換。パラメータ名 → 変換名 (_TRANSFORM_REGISTRY のキー)。"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "値が大きいほど優先。省略時は 0。同一 priority で複数ルールがマッチし decision が競合する場合は DEFER になる。"
           }
         }
       }

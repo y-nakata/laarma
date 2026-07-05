@@ -7,8 +7,8 @@
 #   denied_tools    : 絶対禁止ツール。呼び出されると即 DENY。
 #   required_params : ツールごとの必須パラメータ。不足時は DEFER。
 #   max_actions     : セッション内の最大アクション数。超過時は DENY。
-#   rules           : 追加の静的ルール（順番に評価、最初にマッチしたものを適用）。
-#   evaluation      : IntentAlignment へ渡す評価パラメータ。
+#   rules           : 追加の静的ルール（全マッチを収集し、最も高い priority のルールを適用。
+#                     同一 priority で decision が競合する場合は DEFER）。
 
 denied_tools:
   - drop_database
@@ -29,10 +29,9 @@ required_params:
 
 max_actions: 50
 
-# 静的ルール（PolicyEngine が順番に評価）
+# 静的ルール（PolicyEngine が全マッチを収集し priority で解決する）
 # 【注記】これらは AARM 仕様外のドメイン固有ルール（試作上の妥協）。
-# path パターンマッチングなどの決定論的変換を PolicyEngine に委ねることで
-# IntentAlignment を純粋な AARM 意図整合性評価に特化させている。
+# path パターンマッチングなどの決定論的変換を PolicyEngine に委ねている。
 rules:
   - id: unsafe_write_path
     decision: MODIFY
@@ -68,6 +67,50 @@ rules:
             path: '\.(conf|config|log|db|sqlite)$'
         - param_matches:
             path: 'database'
+
+  # 以下2組は #112 Phase A の同一 priority 競合(R3(b))の回帰テスト専用フィクスチャ。
+  # benchmark_data.jsonl の defer_priority_conflict_deny_allow / defer_priority_conflict_modify_modify
+  # からのみ発火するよう、テスト専用のファイル名にのみマッチさせている。
+
+  - id: _test_priority_conflict_deny
+    decision: DENY
+    reason: "テスト専用: 同一 priority 競合の DENY 側。"
+    priority: 5
+    conditions:
+      tool: delete_file
+      param_matches:
+        path: '^conflict_target\.txt$'
+
+  - id: _test_priority_conflict_allow
+    decision: ALLOW
+    reason: "テスト専用: 同一 priority 競合の ALLOW 側。"
+    priority: 5
+    conditions:
+      tool: delete_file
+      param_matches:
+        path: '^conflict_target\.txt$'
+
+  - id: _test_priority_conflict_modify_a
+    decision: MODIFY
+    reason: "テスト専用: 同一 priority 競合の MODIFY 側 A（path を変換）。"
+    priority: 5
+    conditions:
+      tool: write_file
+      param_matches:
+        path: '^conflict_modify_target\.txt$'
+    modify_transform:
+      path: basename
+
+  - id: _test_priority_conflict_modify_b
+    decision: MODIFY
+    reason: "テスト専用: 同一 priority 競合の MODIFY 側 B（content を変換、path とはキーが重ならない）。"
+    priority: 5
+    conditions:
+      tool: write_file
+      param_matches:
+        path: '^conflict_modify_target\.txt$'
+    modify_transform:
+      content: to_relative
 
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:

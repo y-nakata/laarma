@@ -13,7 +13,7 @@ python my_project/demo.py
 | 変数 | デフォルト | 説明 |
 |------|---------|------|
 | `ANTHROPIC_API_KEY` | — | 必須 |
-| `AARM_MODEL` | `claude-sonnet-4-6` | IntentAlignment / DeferralResolver が使うモデル |
+| `AARM_MODEL` | `claude-sonnet-4-6` | DeferralResolver が使うモデル |
 | `AARM_LLM_TIMEOUT` | `30` | LLM 呼び出しタイムアウト（秒） |
 | `AARM_LLM_MAX_RETRIES` | `3` | LLM 呼び出し失敗時の最大リトライ回数 |
 | `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword`。詳細は [EMBEDDING.md](EMBEDDING.md) |

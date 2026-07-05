@@ -222,7 +222,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - **除去**: `intent_alignment.py` の decision 判定 LLM、`policy_engine.py` の `_confirm_with_ia` 提案/上書き構造、および静的ルール収束ループ（`max_modify_iterations`。§2「MODIFY は1パス変換で terminal」参照）。
 - **活かす**: `distance_calculator.py`、Context Accumulator の δ 産出。
 - **拡張**: `_match_conditions`（δ 参照。本リファクタ内で需要駆動に段階実装、旧 #107 吸収）、ポリシー評価を priority 解決の (a,C) 評価エンジンに（MODIFY は1パス変換で terminal、同一 priority 複数 MODIFY は DEFER）。confidence 計算への LLM 活用（§5）。
-- **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計で大きく変わるため、実装時に見直す。
+- **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計により該当部分が置き換え済み。同メモの冒頭に状態表記を追加し、有効な部分（STEP_UP+modified_params の扱い等）と無効な部分（提案/上書き構造）を明示した。
 - **温存（本設計では触らない）**: `max_actions`（回数上限による運用バックストップ。ゴールに近づかないまま動作を継続する状態＝intent drift 的な暴走を、drift 検出機構が無い現状で回数によって粗く肩代わりして止める。AARM の (a, C) 意図評価とは無関係の運用ガードであり、本物の drift 検出〔δ の distance drift / scope_expansion、#99〕が入れば役割はそちらへ移る。現状 benchmark ではどのケースも閾値〔既定 50〕に届かず休眠）。
 
 実装時の規律（#94 で確立）: 統合すべきもの（confidence の入口写像・DEFER トリガー・δ のポリシー参照）を切り離さない / 条件1〜15 の移行を benchmark で検証しながら実装する / 危険性を confidence に混ぜない。
@@ -233,9 +233,9 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 本メモの設計は試作段階の想定であり、実装で確認が取れているのは一部。概略:
 
-- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。現行の提案/上書きモデル（除去対象として現存）。
-- **設計のみ・未実装**: 決定層のポリシー評価エンジン化、LLM decision 判定の除去、MODIFY 収束ループの廃止（1パス化）、条件1〜15 の移行対応、DEFER トリガーの FRAMEWORK/CONFORMANCE 統合、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。
-- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さ・矛盾を低く算出するか。
+- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
+- **設計のみ・未実装**: δ を参照する match predicate（semantic_distance/data_classification/confidence の閾値・集合参照。条件1〜15 の移行対応）、DEFER トリガーの FRAMEWORK/CONFORMANCE 統合のうち δ 依存部分、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。いずれも Phase B 以降の対象。
+- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さ・矛盾を低く算出するか。Phase A 単独ではこれらは baseline ALLOW に素通りする既知の回帰であり（`benchmark_data.jsonl` の `known_regression_until: "Phase B"`）、Phase B とセットで回復を確認する。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。
 
 ---

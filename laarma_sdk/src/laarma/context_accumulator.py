@@ -72,8 +72,8 @@ def _compute_confidence(
     """
     確信度を 0.0 (全く評価できない) 〜 1.0 (完全に評価できる) で算出する。
     AARM 仕様 §IV-C: confidence は「(a, C) を自信を持って評価できる度合い」であり、
-    アクションの危険度ではない。危険度は data_classification シグナルと
-    IntentAlignment（STEP_UP / DENY）が担う。
+    アクションの危険度ではない。危険度は data_classification シグナルを参照する
+    ポリシー条件（STEP_UP / DENY）が担う。
     """
     score = 1.0
 

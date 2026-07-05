@@ -1,27 +1,12 @@
-"""Benchmark runner for AARM pipeline layers.
+"""Benchmark runner for the AARM PolicyEngine.
 
 Usage:
   pip install -e laarma_sdk
-  export ANTHROPIC_API_KEY=your_api_key
-  python my_project/benchmark.py                       # pipeline mode (default)
-  python my_project/benchmark.py --mode policy-engine  # PolicyEngine only, no LLM
-  python my_project/benchmark.py --pure-intent-alignment  # raw LLM judgment
+  python my_project/benchmark.py
 
-Modes:
-  pipeline (default)
-    Full PolicyEngine + IntentAlignment pipeline with policy.yaml.
-    Tests the system as deployed.
-
-  policy-engine  (--mode policy-engine)
-    Skip IntentAlignment entirely. Tests PolicyEngine rules in isolation.
-    No API calls — fast deterministic regression test.
-    Cases whose expected decision is ALLOW or STEP_UP are SKIP
-    (PolicyEngine cannot produce these).
-
-  intent-alignment  (--pure-intent-alignment / --mode intent-alignment)
-    Bypass PolicyEngine configurable rules (keep denied_tools only).
-    Disable confidence/scope-expansion pre-checks in IntentAlignment.
-    Tests the LLM's raw semantic judgment. Mismatches are informational only.
+Phase A (#112) removed the LLM-based decision layer (IntentAlignment) entirely.
+PolicyEngine.evaluate() is now the sole, deterministic decision path — there is
+no LLM call in it, so this runner has a single mode and needs no API key.
 """
 
 from __future__ import annotations
@@ -39,14 +24,10 @@ _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from laarma import (
-    AARMRuntime, Decision, EnvironmentContext, IdentityContext,
-    IntentAlignment, MaintenanceWindow, Policy, load_policy,
-)
+from laarma import AARMRuntime, Decision, EnvironmentContext, IdentityContext, MaintenanceWindow, load_policy
 from laarma.models import Action, AuthorizationResult
-from laarma.policy_engine import DEFAULT_POLICY
 from laarma.step_up_resolver import StepUpResolver
 from my_project.identity_keys import load_or_create_keypair
 
@@ -58,43 +39,13 @@ _BENCHMARK_HUMAN_KEY   = load_or_create_keypair(_KEYS_DIR, "benchmark@local")
 _BENCHMARK_AGENT_KEY   = load_or_create_keypair(_KEYS_DIR, "benchmark-agent-instance")
 _BENCHMARK_SERVICE_KEY = load_or_create_keypair(_KEYS_DIR, "benchmark-runner")
 
-
-class _AlwaysAllowStub:
-    """policy-engine モード用スタブ。IntentAlignment を使わず常に ALLOW を返す。"""
-    def evaluate(
-        self,
-        action: Action,
-        context_summary: dict,
-        environment: Any = None,
-    ) -> AuthorizationResult:
-        return AuthorizationResult(decision=Decision.ALLOW, reason="stub", action=action)
-
-
-class _IASpy:
-    """
-    実 IntentAlignment をラップし、evaluate() が呼ばれたかどうかだけを記録する計測用スパイ。
-
-    PolicyEngine.evaluate() は DENY が確定する3経路（denied_tools / privilege_scope /
-    静的ルールでの DENY）でのみ IntentAlignment を呼ばずに終端する。この呼び出しの有無を
-    観測すれば、各ケースが pipeline モードで LLM 依存かどうかをルール変更に追従して
-    判定できる（ベンチマーク側の計測のみで、IntentAlignment の挙動自体は変えない）。
-    """
-    def __init__(self, real: IntentAlignment) -> None:
-        self._real = real
-        self.called = False
-
-    def evaluate(self, *args: Any, **kwargs: Any) -> AuthorizationResult:
-        self.called = True
-        return self._real.evaluate(*args, **kwargs)
-
 # path 変換のドメイン知識。policy.yaml の modify_transform が参照する。
 _TRANSFORM_REGISTRY: dict[str, Any] = {
     "basename":    os.path.basename,
     "to_relative": lambda p: "./" + p.lstrip("/"),
 }
 
-# PolicyEngine のみが判断できる decision セット
-_POLICY_ENGINE_DECISIONS = {Decision.DENY, Decision.DEFER, Decision.MODIFY}
+_POLICY_PATH = Path(__file__).parent / "policies" / "policy.yaml"
 
 
 @dataclass
@@ -106,10 +57,9 @@ class BenchmarkCase:
     expected_decision: str
     expected_modified_params: dict[str, Any] | None
     identity: dict[str, Any] | None = None
-    pipeline_only: bool = False  # True のとき policy-engine モードでスキップ
-    # True のとき、pipeline モードでの不一致は fail にせず informational として扱う
-    # （expected_decision は policy-engine モードでの検証が主、pipeline での IA 上書きは別 issue 依存）
-    pipeline_informational: bool = False
+    # 非 None のとき、expected_decision とのミスマッチは fail ではなく informational として
+    # 扱う（値は「いつ回復する見込みか」の注記、例: "Phase B"。ロジックには使わない）。
+    known_regression_until: str | None = None
     note: str | None = None  # ケースの検証意図・素性の説明（ロジックには使わない）
 
 
@@ -128,8 +78,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 expected_decision=data["expected_decision"],
                 expected_modified_params=data.get("expected_modified_params"),
                 identity=data.get("identity"),
-                pipeline_only=data.get("pipeline_only", False),
-                pipeline_informational=data.get("pipeline_informational", False),
+                known_regression_until=data.get("known_regression_until"),
                 note=data.get("note"),
             ))
     return cases
@@ -167,48 +116,8 @@ def compare_modified_params(actual: dict[str, Any] | None, expected: dict[str, A
     return True
 
 
-def _build_policy(mode: str) -> tuple[Policy, dict]:
-    """モードに応じた Policy と transform_registry を返す。"""
-    policy_path = Path(__file__).parent / "policies" / "policy.yaml"
-
-    if mode == "pipeline":
-        return load_policy(policy_path), _TRANSFORM_REGISTRY
-
-    if mode == "intent-alignment":
-        # PolicyEngine の configurable rules を空にする。denied_tools は安全上の理由で残す。
-        policy = Policy(
-            denied_tools=set(DEFAULT_POLICY.denied_tools),
-            required_params={},
-            max_actions=999,
-            rules=[],
-        )
-        return policy, {}
-
-    if mode == "policy-engine":
-        return load_policy(policy_path), _TRANSFORM_REGISTRY
-
-    raise ValueError(f"Unknown mode: {mode}")
-
-
-def run_case(
-    case: BenchmarkCase,
-    mode: str = "pipeline",
-    model: str | None = None,
-) -> tuple[Decision | None, dict[str, Any] | None, float, str, str | None, dict | None, bool]:
-    """
-    Returns (decision, modified_params, elapsed_seconds, status, reason, context_summary, ia_invoked).
-    status: "run" | "skip"
-    ia_invoked: pipeline モードで IntentAlignment.evaluate() が実際に呼ばれたか
-                （policy-engine モードでは常に False — スタブで代用するため計測不要）。
-    """
-    expected = Decision(case.expected_decision)
-
-    # policy-engine モードでは LLM 判断が必要なケースをスキップ
-    if mode == "policy-engine" and (
-        expected not in _POLICY_ENGINE_DECISIONS or case.pipeline_only
-    ):
-        return None, None, 0.0, "skip", None, None, False
-
+def run_case(case: BenchmarkCase) -> tuple[Decision, dict[str, Any] | None, float, str | None, dict]:
+    """Returns (decision, modified_params, elapsed_seconds, reason, context_summary)."""
     env = build_environment(case.environment)
     # case に identity.privilege_scope があればそれを使い、なければ評価対象ツールのみ許可する
     # （デフォルトはツールが必ずスコープ内になるため privilege_scope DENY は発火しない）
@@ -230,30 +139,18 @@ def run_case(
         .sign_agent(_BENCHMARK_AGENT_KEY)
         .sign_service(_BENCHMARK_SERVICE_KEY)
     )
-    policy, transform_registry = _build_policy(mode)
-    # AARMRuntime のデフォルト解決 (model or AARM_MODEL or claude-sonnet-4-6) を計測用にも合わせる
-    ia_spy = (
-        _IASpy(IntentAlignment(model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6")))
-        if mode == "pipeline" else None
-    )
+    policy = load_policy(_POLICY_PATH)
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,
         environment=env,
-        model=model,
         policy=policy,
-        transform_registry=transform_registry,
-        _skip_intent_alignment_for_testing=(mode == "policy-engine"),
-        _intent_alignment=(_AlwaysAllowStub() if mode == "policy-engine" else ia_spy),
+        transform_registry=_TRANSFORM_REGISTRY,
     )
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
     elapsed = time.monotonic() - start
-    ia_invoked = ia_spy.called if ia_spy is not None else False
-    return (
-        result.decision, result.modified_params, elapsed, "run", result.reason,
-        runtime.context_summary, ia_invoked,
-    )
+    return result.decision, result.modified_params, elapsed, result.reason, runtime.context_summary
 
 
 def run_step_up_unit_tests() -> int:
@@ -329,120 +226,11 @@ def run_step_up_unit_tests() -> int:
     return fail_count
 
 
-def _fake_llm_text_response(text: str) -> MagicMock:
-    """anthropic.Anthropic().messages.create() の戻り値を模した MagicMock。"""
-    block = MagicMock()
-    block.text = text
-    resp = MagicMock()
-    resp.content = [block]
-    resp.stop_reason = "end_turn"
-    return resp
-
-
-def run_intent_alignment_anomaly_unit_tests() -> int:
-    """
-    IntentAlignment.evaluate() の出力バリデーション（#88）をユニットレベルで検証する。
-    anthropic クライアントをモックし、LLM の異常応答・呼び出し失敗が
-    すべて DENY に収束すること（DEFER フォールバックが残っていないこと）を確認する。
-
-    Returns: 失敗ケース数（0 = 全 PASS）。
-    """
-    _dummy_action = Action(tool_name="write_file", parameters={"path": "config.bak", "content": "x"})
-    _context_summary = {
-        "user_intent": "設定ファイルのバックアップを書き出して",
-        "action_count": 0,
-        "recent_actions": [],
-        "derived_signals": {},
-    }
-
-    cases = [
-        {
-            "id": "ia_anomaly_modify_returned",
-            "llm_text": '{"decision": "MODIFY", "reason": "should not happen", "modified_params": {"path": "x"}}',
-            "raises": None,
-            "reason_substr": "MODIFY を返してはならない",
-        },
-        {
-            "id": "ia_anomaly_unknown_decision",
-            "llm_text": '{"decision": "FOOBAR", "reason": "unknown"}',
-            "raises": None,
-            "reason_substr": "未知の decision 値",
-        },
-        {
-            "id": "ia_anomaly_unparseable_response",
-            "llm_text": "申し訳ありませんが対応できません。",
-            "raises": None,
-            "reason_substr": "応答を解釈できませんでした",
-        },
-        {
-            "id": "ia_anomaly_client_call_fails",
-            "llm_text": None,
-            "raises": Exception("simulated max_retries exhausted"),
-            "reason_substr": "LLM 呼び出しに失敗しました",
-        },
-    ]
-
-    print("\n--- IntentAlignment anomaly → DENY unit tests (#88) ---")
-    fail_count = 0
-    for c in cases:
-        ia = IntentAlignment()
-        mock_client = MagicMock()
-        if c["raises"] is not None:
-            mock_client.messages.create.side_effect = c["raises"]
-        else:
-            mock_client.messages.create.return_value = _fake_llm_text_response(c["llm_text"])
-
-        with patch.object(IntentAlignment, "_get_client", return_value=mock_client):
-            result = ia.evaluate(_dummy_action, _context_summary, environment=None)
-
-        ok = (
-            result.decision == Decision.DENY
-            and result.modified_params is None
-            and c["reason_substr"] in result.reason
-        )
-        label = "✅" if ok else "❌"
-        print(f"{label} {c['id']}")
-        if not ok:
-            print(f"   decision:        expected=DENY  actual={result.decision.value}")
-            print(f"   modified_params: expected=None  actual={result.modified_params}")
-            print(f"   reason contains '{c['reason_substr']}': actual={result.reason!r}")
-            fail_count += 1
-
-    total = len(cases)
-    print(f"{total - fail_count} passed, {fail_count} failed\n")
-    return fail_count
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run AARM benchmark cases.")
+    parser = argparse.ArgumentParser(description="Run AARM PolicyEngine benchmark cases.")
     parser.add_argument("--data-file", default="benchmark_data.jsonl", help="Benchmark dataset JSONL file")
-    parser.add_argument("--model", default=None, help="Claude model to use for IntentAlignment")
-    parser.add_argument(
-        "--mode",
-        choices=["pipeline", "intent-alignment", "policy-engine"],
-        default="pipeline",
-        help=(
-            "pipeline: full PolicyEngine + IntentAlignment (default); "
-            "intent-alignment: raw LLM judgment, bypass configurable rules; "
-            "policy-engine: PolicyEngine only, no LLM"
-        ),
-    )
-    # 後方互換エイリアス
-    parser.add_argument("--pure-intent-alignment", action="store_true",
-                        help="Alias for --mode intent-alignment (backwards compatible)")
     parser.add_argument("--verbose", action="store_true", help="Show detailed case output")
-    parser.add_argument(
-        "--repeat", type=int, default=3,
-        help=(
-            "pipeline モードで IntentAlignment が実際に関与したケースのみ、安定性計測のため"
-            "この回数だけ繰り返し実行する（default: 3）。IA を呼ばない決定論ケースや他モードは常に1回。"
-        ),
-    )
     args = parser.parse_args()
-
-    mode = args.mode
-    if args.pure_intent_alignment:
-        mode = "intent-alignment"
 
     data_path = Path(__file__).resolve().parent / args.data_file
     if not data_path.exists():
@@ -453,109 +241,42 @@ def main() -> int:
     total_time = 0.0
     pass_count = 0
     fail_count = 0
-    skip_count = 0
     inform_count = 0
-    unstable_count = 0
     summary: dict[str, int] = {d.value: 0 for d in Decision}
     mismatches: list[str] = []
-    ia_passthrough_mismatches: list[str] = []
-    pipeline_informational_mismatches: list[str] = []
-    unstable_cases: list[tuple[str, int, int]] = []
-    strict_mode = (mode != "intent-alignment")
+    known_regression_mismatches: list[str] = []
 
     print(f"Loaded {len(cases)} benchmark cases from {data_path}")
-    print(f"Mode: {mode}")
-    if mode != "policy-engine":
-        print(f"Model: {args.model or os.getenv('AARM_MODEL', 'default')}")
-    if mode == "intent-alignment":
-        print("Note: intent-alignment mode tests raw LLM judgment; mismatches are informational only.")
-    if mode == "policy-engine":
-        print("Note: policy-engine mode skips ALLOW/STEP_UP cases (not decidable without IntentAlignment).")
     print()
 
-    def _ok(decision: Decision, modified_params: dict | None, expected: str, case: BenchmarkCase) -> bool:
-        return (
-            decision.value == expected
-            and compare_modified_params(modified_params, case.expected_modified_params)
-        )
-
     for case in cases:
-        run = run_case(case, mode=mode, model=args.model)
-        decision, modified_params, elapsed, status, reason, context, ia_invoked = run
-
-        if status == "skip":
-            skip_count += 1
-            if args.verbose:
-                print(f"Case: {case.id}  [SKIP — not decidable by PolicyEngine alone]")
-            continue
-
-        expected = case.expected_decision
-        runs = [run]
-        # 安定性計測は pipeline モードで IntentAlignment が実際に関与したケースのみ。
-        # 決定論ケース（denied_tools/privilege_scope/静的 DENY ルールで終端）は1回で確定する。
-        repeat_n = args.repeat if (mode == "pipeline" and ia_invoked) else 1
-        for _ in range(repeat_n - 1):
-            runs.append(run_case(case, mode=mode, model=args.model))
-
-        total_time += sum(r[2] for r in runs)
+        decision, modified_params, elapsed, reason, context = run_case(case)
+        total_time += elapsed
         summary[decision.value] += 1
 
-        oks = [_ok(r[0], r[1], expected, case) for r in runs]
-        pass_n = sum(oks)
-        total_n = len(runs)
-        if pass_n == total_n:
-            stability = "stable_pass"
-        elif pass_n == 0:
-            stability = "stable_fail"
-        else:
-            stability = "mixed"
-
-        # policy-engine モードで PolicyEngine が ALLOW（= pass-through）を返したが
-        # 期待値が DENY/STEP_UP の場合は「IntentAlignment が担うべき判断」であり
-        # PolicyEngine の正常動作。strict fail ではなく informational として扱う。
-        ia_passthrough = (
-            mode == "policy-engine"
-            and decision == Decision.ALLOW
-            and expected in (Decision.DENY, Decision.STEP_UP, Decision.DEFER)
+        ok = (
+            decision.value == case.expected_decision
+            and compare_modified_params(modified_params, case.expected_modified_params)
         )
-        # pipeline_informational ケース（例: defer_production_delete）は、expected_decision の
-        # 検証主体が policy-engine モードであり、pipeline での不一致は #94 の射程（IA 上書き）の
-        # ため fail にしない。ただし実際の decision はサマリに残し、症状を追跡可能にする。
-        pipeline_informational_mismatch = (
-            mode == "pipeline" and case.pipeline_informational and stability != "stable_pass"
-        )
+        known_regression = case.known_regression_until is not None and not ok
 
-        if stability == "stable_pass":
+        if ok:
             pass_count += 1
-        elif stability == "mixed":
-            unstable_count += 1
-            unstable_cases.append((case.id, pass_n, total_n))
-        elif ia_passthrough:
+        elif known_regression:
             inform_count += 1
-            ia_passthrough_mismatches.append(case.id)
-        elif pipeline_informational_mismatch:
-            inform_count += 1
-            pipeline_informational_mismatches.append(
-                f"{case.id} (expected={expected}, actual={decision.value})"
+            known_regression_mismatches.append(
+                f"{case.id} (expected={case.expected_decision}, actual={decision.value}, "
+                f"until={case.known_regression_until})"
             )
-        elif strict_mode:
+        else:
             fail_count += 1
             mismatches.append(case.id)
-        else:
-            mismatches.append(case.id)
 
-        informational = ia_passthrough or pipeline_informational_mismatch
-        # ia_passthrough（policy-engine の ALLOW pass-through）は元から非表示。
-        # pipeline_informational の不一致は informational でも実際の decision を可視化するため表示する。
-        if args.verbose or (stability != "stable_pass" and not ia_passthrough):
-            if stability == "mixed":
-                label = "🔀"
-            elif stability == "stable_pass":
+        if args.verbose or not ok:
+            if ok:
                 label = "✅"
-            elif informational:
-                label = "ℹ️ "
-            elif not strict_mode:
-                label = "⚠️"
+            elif known_regression:
+                label = "🚧"
             else:
                 label = "❌"
             print(f"{label} Case: {case.id}")
@@ -563,8 +284,6 @@ def main() -> int:
             print(f"  action: {case.action}")
             print(f"  expected: {case.expected_decision}")
             print(f"  actual:   {decision.value}")
-            if total_n > 1:
-                print(f"  stability: {pass_n}/{total_n} pass ({stability})")
             if reason:
                 print(f"  reason:   {reason}")
             if case.expected_modified_params or modified_params:
@@ -580,53 +299,31 @@ def main() -> int:
                     print(f"  data_classifications: {dc}")
             print(f"  elapsed: {elapsed:.2f}s\n")
 
-    run_count = len(cases) - skip_count
     print("Benchmark summary:")
     print(f"  cases:         {len(cases)}")
-    print(f"  run:           {run_count}")
-    print(f"  skip:          {skip_count}")
     print(f"  pass:          {pass_count}")
     print(f"  fail:          {fail_count}")
-    if unstable_count:
-        print(f"  unstable:      {unstable_count}  (mixed pass/fail across repeated runs — nondeterminism, not a regression)")
     if inform_count:
-        print(f"  informational: {inform_count}  (see breakdown below — not counted as fail)")
-    if run_count > 0:
-        print(f"  total time:    {total_time:.2f}s")
-        print(f"  avg time/case: {total_time / run_count:.2f}s")
+        print(f"  informational: {inform_count}  (known regressions, not counted as fail — see breakdown below)")
+    print(f"  total time:    {total_time:.2f}s")
+    print(f"  avg time/case: {total_time / len(cases):.2f}s")
     print("  decisions:")
     for d, count in summary.items():
         if count:
             print(f"    {d}: {count}")
 
     if mismatches:
-        label = "Mismatched cases" if strict_mode else "Informational mismatches"
-        print(f"\n{label}:")
+        print("\nMismatched cases:")
         for case_id in mismatches:
             print(f"  - {case_id}")
 
-    if ia_passthrough_mismatches:
-        print("\nInformational — PolicyEngine pass-through (IntentAlignment would decide):")
-        for case_id in ia_passthrough_mismatches:
-            print(f"  - {case_id}")
-
-    if pipeline_informational_mismatches:
-        print("\nInformational — pipeline_informational cases (expected_decision is authoritative only in "
-              "policy-engine mode; pipeline mismatch is tracked here, not counted as fail):")
-        for entry in pipeline_informational_mismatches:
+    if known_regression_mismatches:
+        print("\nInformational — known regressions (tracked, not counted as fail):")
+        for entry in known_regression_mismatches:
             print(f"  - {entry}")
 
-    if unstable_cases:
-        print("\nUnstable cases (mixed pass/fail across repeated runs — nondeterminism, not a regression):")
-        for case_id, pass_n, total_n in unstable_cases:
-            print(f"  - {case_id}: {pass_n}/{total_n} pass")
-
-    if mode == "intent-alignment":
-        print("\nNote: intent-alignment mode is exploratory; mismatches do not cause a nonzero exit status.")
-
     step_up_fail_count = run_step_up_unit_tests()
-    ia_anomaly_fail_count = run_intent_alignment_anomaly_unit_tests()
-    return 1 if (fail_count or step_up_fail_count or ia_anomaly_fail_count) else 0
+    return 1 if (fail_count or step_up_fail_count) else 0
 
 
 if __name__ == "__main__":

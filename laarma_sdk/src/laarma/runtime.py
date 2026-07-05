@@ -1,6 +1,6 @@
 """
 AARM Runtime — R1〜R6 統合
-「インターセプト → コンテキスト蓄積 → ポリシー評価 → 意図整合性評価 (a, C, E) → 記録」
+「インターセプト → コンテキスト蓄積 → ポリシー評価 (a, C, E) → 記録」
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 from .context_accumulator import ContextAccumulator
 from .environment import EnvironmentContext
-from .intent_alignment import IntentAlignment
 from .models import Action, AuthorizationResult, Decision, IdentityContext
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine
 
@@ -38,32 +37,16 @@ class AARMRuntime:
         identity: IdentityContext | None = None,
         environment: EnvironmentContext | None = None,
         policy: Policy | None = None,
-        model: str | None = None,
         metadata: dict[str, Any] | None = None,
-        _skip_intent_alignment_for_testing: bool = False,
         transform_registry: "dict[str, Any] | None" = None,
-        _intent_alignment: "Any | None" = None,
     ) -> None:
         self._identity    = identity
         self._environment = environment
         _policy           = policy or DEFAULT_POLICY
         self._accumulator = ContextAccumulator(user_intent=user_intent, metadata=metadata, policy=_policy)
-        # IntentAlignment を構築して PolicyEngine に注入する（提案/上書きモデル）
-        if _skip_intent_alignment_for_testing:
-            if not os.getenv("AARM_ALLOW_SKIP_INTENT_ALIGNMENT"):
-                raise RuntimeError(
-                    "skip_intent_alignment_for_testing は本番環境では使用禁止です。"
-                    "テスト目的で使用する場合は AARM_ALLOW_SKIP_INTENT_ALIGNMENT=1 を設定してください。"
-                )
-            ia = _intent_alignment  # スタブが注入されている場合はそれを使用
-        else:
-            ia = _intent_alignment or IntentAlignment(
-                model=model or os.getenv("AARM_MODEL", "claude-sonnet-4-6"),
-            )
         self._policy_engine = PolicyEngine(
             policy=_policy,
             transform_registry=transform_registry,
-            intent_alignment=ia,
         )
         self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
         self._receipt_secret = os.getenv("AARM_RECEIPT_SECRET")

@@ -1,34 +1,32 @@
 """
-AARM Policy Engine — R3 式(3) の π を完全実装（提案/上書きモデル）
+AARM Policy Engine — R3 式(3) の π を評価する priority 解決エンジン
 
-PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す。
-IntentAlignment はその内部協力者（外部から注入される）。
+PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す単一の関数である
+（式3: π:(a,C)→{ALLOW,DENY,MODIFY,STEP_UP,DEFER}）。
 
-設計方針: docs/design/policy-engine-proposal-override.md §6 参照。
+設計方針: docs/design/decision-layer-policy-engine.md 参照。
 
-  - decision == DENY  → terminal（IntentAlignment 不要。常に安全側）
-  - それ以外（ALLOW / MODIFY / DEFER / STEP_UP、またはルールなし → 暗黙 ALLOW）
-      → 「提案」として IntentAlignment に確認する
-      → IA が ALLOW → 提案確定
-      → IA が ALLOW 以外 → IA の判断で上書き（proposed_decision に元の提案を記録）
-
-収束ループ（§6「MODIFY 変換は書き換え後に再評価して収束させる」）:
-  MODIFY ルールが発火するたびにアクションを変換し、変換後のアクションでルール評価を再実行。
-  DENY が出たら即 terminal。マッチするルールが尽きたら MODIFY 提案として確定。
-  max_modify_iterations（デフォルト 10）で振動を検出し、到達時は DENY。
+  - `rules` に対する評価は1パスのみ（収束ループは持たない）。
+    全マッチするルールを収集し、最高 priority のグループで decision を決める。
+    同一 priority グループ内で decision が割れている（または MODIFY が複数マッチした）場合は
+    R3(b) の同一 priority 競合として terminal DEFER にする。
+  - MODIFY は変換を1回だけ適用して terminal（変換後に再ループしない。変換後に別ルールが
+    マッチするならルール集合が矛盾しており、それは同一 priority 競合の枠組みでは捉えられない
+    設定ミスである——δ 参照ルールを MODIFY より高 priority に置くことで意図整合性を担保する
+    設計は Phase B の対象）。
+  - denied_tools / privilege_scope は `rules` の priority システムの外側にある独立した
+    事前チェックとして扱う（R3/Table I の Forbidden 分類——コンテキスト評価が完全に無視される
+    唯一の分類——に対応）。
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, replace as dc_replace
-from typing import TYPE_CHECKING, Callable
+from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from .environment import EnvironmentContext
 from .models import Action, AuthorizationResult, Decision, SessionContext
-
-if TYPE_CHECKING:
-    from .intent_alignment import IntentAlignment
 
 
 def _match_conditions(
@@ -72,6 +70,7 @@ class StaticRule:
     reason:           str
     conditions:       dict        = field(default_factory=dict)
     modify_transform: dict | None = None  # {"param_name": "transform_name"} — MODIFY 時のみ
+    priority:         int         = 0     # 値が大きいほど優先。無指定のルールは全て同一階層(0)
 
 
 @dataclass
@@ -97,21 +96,22 @@ DEFAULT_POLICY = Policy(
     },
 )
 
-_DEFAULT_MAX_MODIFY_ITERATIONS = 10
+
+class _PriorityResolution(NamedTuple):
+    """`_resolve_priority()` の結果。winner と conflict_group は排他的（片方は必ず None）。"""
+    winner:         StaticRule | None
+    conflict_group: list[StaticRule] | None
+    top_priority:   int | None
 
 
 class PolicyEngine:
     def __init__(
         self,
         policy: Policy | None = None,
-        transform_registry: dict[str, Callable[[str], str]] | None = None,
-        intent_alignment: "IntentAlignment | None" = None,
-        max_modify_iterations: int = _DEFAULT_MAX_MODIFY_ITERATIONS,
+        transform_registry: "dict[str, object] | None" = None,
     ) -> None:
-        self._policy                = policy or DEFAULT_POLICY
-        self._registry              = transform_registry or {}
-        self._ia                    = intent_alignment
-        self._max_modify_iterations = max_modify_iterations
+        self._policy   = policy or DEFAULT_POLICY
+        self._registry = transform_registry or {}
         for rule in self._policy.rules:
             if rule.modify_transform:
                 for transform_name in rule.modify_transform.values():
@@ -130,9 +130,6 @@ class PolicyEngine:
     ) -> AuthorizationResult:
         """
         式(3)の π として (a, C, E) を評価し、常に terminal な AuthorizationResult を返す。
-
-        DENY は即 terminal。それ以外は「提案」として IntentAlignment に確認する。
-        IntentAlignment が ALLOW → 提案確定。ALLOW 以外 → 上書き。
         """
         p = self._policy
 
@@ -163,112 +160,99 @@ class PolicyEngine:
                 decision_source="denied_tools",
             )
 
-        # 2. 静的ルール収束ループ
-        #    MODIFY がマッチするたびアクションを変換して再評価する。
-        #    DENY が出たら即 terminal。ルールが尽きたら MODIFY 提案（変換があれば）。
-        #    max_modify_iterations に達したら設定ミス（振動）として DENY。
-        current_params    = dict(action.parameters)
-        accumulated_mod   = None   # 累積変換結果
-        last_rule_id      = None   # 最後に発火した MODIFY ルールの ID
-        last_rule_reason  = None
-        rule_proposal     = None   # MODIFY 以外のルールがマッチした場合の提案
+        # 2. 静的ルール評価 — 1パスのみ（収束ループは持たない）
+        #    全マッチを収集し priority で解決する。同一 priority で decision が割れている
+        #    （または MODIFY が複数マッチした）場合は terminal DEFER（R3(b) 競合トリガー）。
+        rule_proposal: AuthorizationResult | None = None
+        current_params = dict(action.parameters)
 
-        for _iter in range(self._max_modify_iterations + 1):
-            if _iter == self._max_modify_iterations:
+        matches = self._collect_matching_rules(action, environment)
+        if matches:
+            resolution = self._resolve_priority(matches)
+
+            if resolution.conflict_group is not None:
+                group = resolution.conflict_group
+                decisions = ",".join(dict.fromkeys(r.decision for r in group))
+                names = " / ".join(f"{r.id}({r.decision})" for r in group)
                 return AuthorizationResult(
-                    decision=Decision.DENY,
+                    decision=Decision.DEFER,
                     reason=(
-                        f"静的ルール評価が収束しませんでした"
-                        f"（max_modify_iterations={self._max_modify_iterations} 到達）。"
-                        "ルール設定を確認してください。"
+                        f"同一優先度(priority={resolution.top_priority})で競合する複数のルールが"
+                        f"マッチしました: {names} — 安全側として保留します。"
                     ),
                     action=action,
+                    policy_rule_id=",".join(r.id for r in group),
+                    proposed_decision=decisions,
                     decision_source="policy_engine",
                 )
 
-            eval_action = Action(
-                tool_name=action.tool_name,
-                parameters=current_params,
-                identity=action.identity,
-                action_id=action.action_id,
-                timestamp=action.timestamp,
-            )
-            match = self._find_matching_rule(eval_action, environment)
-
-            if match is None:
-                break  # マッチするルールが尽きた
-
-            rule, mod_params = match
-            decision = Decision(rule.decision)
+            winner = resolution.winner
+            assert winner is not None  # conflict_group が None なら winner は必ず設定される
+            decision = Decision(winner.decision)
 
             if decision == Decision.DENY:
                 try:
-                    reason = rule.reason.format(**current_params)
+                    reason = winner.reason.format(**current_params)
                 except (KeyError, ValueError):
-                    reason = rule.reason
+                    reason = winner.reason
                 return AuthorizationResult(
                     decision=Decision.DENY,
                     reason=reason,
                     action=action,
-                    modified_params=accumulated_mod,
-                    policy_rule_id=rule.id,
+                    policy_rule_id=winner.id,
                     decision_source="policy_engine",
                 )
 
-            if decision == Decision.MODIFY and mod_params is not None:
-                current_params  = mod_params
-                accumulated_mod = mod_params
-                last_rule_id    = rule.id
+            if decision == Decision.MODIFY:
+                modified_params = dict(current_params)
+                if winner.modify_transform:
+                    for param, transform_name in winner.modify_transform.items():
+                        transform = self._registry.get(transform_name)
+                        if transform and param in modified_params:
+                            modified_params[param] = transform(str(modified_params[param]))
+                current_params = modified_params
                 try:
-                    last_rule_reason = rule.reason.format(**action.parameters)
+                    reason = winner.reason.format(**action.parameters)
                 except (KeyError, ValueError):
-                    last_rule_reason = rule.reason
-                continue  # 変換後のアクションで再評価
+                    reason = winner.reason
+                rule_proposal = AuthorizationResult(
+                    decision=Decision.MODIFY,
+                    reason=reason,
+                    action=action,
+                    modified_params=modified_params,
+                    policy_rule_id=winner.id,
+                    decision_source="policy_engine",
+                )
+            else:
+                # ALLOW / DEFER / STEP_UP
+                try:
+                    reason = winner.reason.format(**current_params)
+                except (KeyError, ValueError):
+                    reason = winner.reason
+                rule_proposal = AuthorizationResult(
+                    decision=decision,
+                    reason=reason,
+                    action=action,
+                    policy_rule_id=winner.id,
+                    decision_source="policy_engine",
+                )
 
-            # MODIFY 以外（DEFER / STEP_UP / ALLOW from rules）→ ループを抜ける
-            try:
-                reason = rule.reason.format(**current_params)
-            except (KeyError, ValueError):
-                reason = rule.reason
-            rule_proposal = AuthorizationResult(
-                decision=decision,
-                reason=reason,
-                action=action,
-                modified_params=accumulated_mod,  # それまでの MODIFY 変換を保持
-                policy_rule_id=rule.id,
-                decision_source="policy_engine",
-            )
-            break
-
-        # ループを "match is None" で抜け、かつ変換が累積していた場合 → MODIFY 提案
-        if rule_proposal is None and accumulated_mod is not None:
-            rule_proposal = AuthorizationResult(
-                decision=Decision.MODIFY,
-                reason=last_rule_reason or "",
-                action=action,
-                modified_params=accumulated_mod,
-                policy_rule_id=last_rule_id,
-                decision_source="policy_engine",
-            )
-
-        # 3. required_params のチェック — 最終 a'（current_params）に対して行う
-        #    提案（DENY 以外）として扱い、IntentAlignment を通す。
-        #    変換済み accumulated_mod は保持したまま DEFER 提案に切り替える。
+        # 3. required_params のチェック — 最終 params（MODIFY 変換後があればそれ）に対して行う
+        #    固定階層（rules の priority 解決には参加しない）。terminal DEFER。
         missing = [
             k for k in p.required_params.get(action.tool_name, [])
             if k not in current_params
         ]
         if missing:
-            proposal = AuthorizationResult(
+            return AuthorizationResult(
                 decision=Decision.DEFER,
                 reason=f"'{action.tool_name}' に必須パラメータが足りません: {missing}",
                 action=action,
-                modified_params=accumulated_mod,
-                decision_source="policy_engine",
+                modified_params=rule_proposal.modified_params if rule_proposal else None,
+                decision_source="required_params",
             )
-            return self._confirm_with_ia(proposal, action, context_summary, environment)
 
-        # 4. 最大アクション数の制限 — DENY は terminal
+        # 4. 最大アクション数の制限 — DENY は terminal。固定階層。
         action_count = sum(1 for e in context.action_history if e.get("type") != "tool_output")
         if action_count >= p.max_actions:
             return AuthorizationResult(
@@ -278,77 +262,49 @@ class PolicyEngine:
                 decision_source="policy_engine",
             )
 
-        # 5. 提案を IntentAlignment に確認
-        proposal = rule_proposal or AuthorizationResult(
+        # 5. rules 評価の結果をそのまま最終決定とする。マッチが無ければベースライン ALLOW。
+        #    このベースライン ALLOW は privilege_scope・denied_tools・required_params・
+        #    max_actions を全て通過した上での ALLOW であり、無審査の default ではない。
+        if rule_proposal is not None:
+            return rule_proposal
+        return AuthorizationResult(
             decision=Decision.ALLOW,
             reason="ポリシー通過。",
             action=action,
-            decision_source="policy_engine",
+            decision_source="baseline_allow",
         )
-        return self._confirm_with_ia(proposal, action, context_summary, environment)
 
-    def _find_matching_rule(
+    def _collect_matching_rules(
         self,
-        eval_action: Action,
+        action: Action,
         environment: EnvironmentContext | None,
-    ) -> tuple[StaticRule, dict | None] | None:
+    ) -> list[StaticRule]:
+        """action にマッチする全ルールを YAML 記述順で返す。"""
+        return [
+            rule for rule in self._policy.rules
+            if _match_conditions(rule.conditions, action, environment)
+        ]
+
+    def _resolve_priority(self, matches: list[StaticRule]) -> _PriorityResolution:
         """
-        eval_action に対して最初にマッチするルールと変換後パラメータを返す。
-        MODIFY でない場合の変換後パラメータは None。マッチなしは None。
+        全マッチから最高 priority のグループを取り、勝者か競合グループを返す。
+
+        競合の定義（単一の原則）:
+          - グループが1件のみ → 競合なし。
+          - グループが複数件で、全員 decision が同じ かつ decision != MODIFY → 競合なし
+            （扱いが一致しているので YAML 記述順の最初を勝者とする）。
+          - それ以外（decision が割れている、または MODIFY が複数マッチ）→ 競合。
+            MODIFY×MODIFY を無条件に競合とするのは、対象パラメータキーが重ならない場合でも
+            1パスでの複数変換マージを行わないため（YAGNI）。
         """
-        for rule in self._policy.rules:
-            if not _match_conditions(rule.conditions, eval_action, environment):
-                continue
+        top_priority = max(r.priority for r in matches)
+        group = [r for r in matches if r.priority == top_priority]
 
-            decision = Decision(rule.decision)
-            if decision == Decision.MODIFY and rule.modify_transform:
-                modified_params = dict(eval_action.parameters)
-                for param, transform_name in rule.modify_transform.items():
-                    transform = self._registry.get(transform_name)
-                    if transform and param in modified_params:
-                        modified_params[param] = transform(str(modified_params[param]))
-                return rule, modified_params
+        if len(group) == 1:
+            return _PriorityResolution(winner=group[0], conflict_group=None, top_priority=top_priority)
 
-            return rule, None
+        decisions = {r.decision for r in group}
+        if len(decisions) == 1 and Decision(next(iter(decisions))) != Decision.MODIFY:
+            return _PriorityResolution(winner=group[0], conflict_group=None, top_priority=top_priority)
 
-        return None
-
-    def _confirm_with_ia(
-        self,
-        proposal: AuthorizationResult,
-        original_action: Action,
-        context_summary: dict,
-        environment: EnvironmentContext | None,
-    ) -> AuthorizationResult:
-        """
-        提案を IntentAlignment に確認する。IA が未注入の場合は提案をそのまま確定。
-
-        IntentAlignment には常に original_action（a）を渡す。IA の役割は
-        「エージェントの意図 a が妥当か」の評価であり、実行されるパラメータ a' が
-        安全かどうかではない。パラメータの封じ込め（path 無害化等）は PolicyEngine の
-        決定論的な別レイヤーであり、IA はそれを覆す権威を持たない。
-
-        採用関係は非対称:
-        - IA が ALLOW → proposal をそのまま確定（decision・modified_params・
-          policy_rule_id は PolicyEngine 提案のまま）。
-        - IA が ALLOW 以外（DENY/DEFER/STEP_UP） → 最終 decision・reason は IA のものを
-          採用する（IA は「a が妥当でない」という判断自体の権威を持つ）。ただし
-          modified_params は proposal（PolicyEngine 由来）を保持し、IA の結果で
-          上書きしない — IA は変換を生成も書き換えもできない。
-        """
-        if self._ia is None:
-            return proposal
-
-        ia_result = self._ia.evaluate(original_action, context_summary, environment)
-
-        if ia_result.decision == Decision.ALLOW:
-            return proposal  # 提案確定
-
-        # IA が上書き — decision/reason は IA 由来。modified_params は proposal を保持し、
-        # policy_rule_id（発火ルール）と proposed_decision（元の提案）を記録する。
-        return dc_replace(
-            ia_result,
-            modified_params=proposal.modified_params,
-            policy_rule_id=proposal.policy_rule_id,
-            proposed_decision=proposal.decision.value,
-        )
+        return _PriorityResolution(winner=None, conflict_group=group, top_priority=top_priority)

@@ -138,7 +138,7 @@ laarma/
 | ドキュメント | 内容 |
 |---|---|
 | [docs/design/decision-layer-policy-engine.md](docs/design/decision-layer-policy-engine.md) | 決定層をポリシー評価エンジンに組み替える（LLM ベース IntentAlignment の除去・priority 解決・MODIFY の1パス terminal 化・DEFER トリガー） |
-| [docs/design/policy-engine-proposal-override.md](docs/design/policy-engine-proposal-override.md) | 〔#112 Phase A により該当部分は置き換え済み〕PolicyEngine を R3・式(3) の π として完成させる提案/上書きモデル。STEP_UP+modified_params の扱い等、一部は現行設計でも有効 |
+| [docs/design/policy-engine-proposal-override.md](docs/design/policy-engine-proposal-override.md) | 〔アーカイブ・#112 Phase A により置き換え済み〕PolicyEngine を R3・式(3) の π として完成させる提案/上書きモデル |
 | [docs/design/environment-demo-fiction.md](docs/design/environment-demo-fiction.md) | 環境条件（`environment_type`・メンテナンス窓）はデモフィクションであり、汎用の環境評価入力に拡張しない |
 | [docs/design/identity-signing.md](docs/design/identity-signing.md) | アイデンティティ署名と R6 の扱い（非対称署名・個別署名/包括署名） |
 | [docs/design/risk-classification.md](docs/design/risk-classification.md) | リスク把握はデータ分類シグナル（δ）で行う（固定のツールリスク等級は持たない） |

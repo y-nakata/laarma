@@ -2,17 +2,12 @@
 
 [← README に戻る](../../README.md)
 
-> **状態（#112 Phase A 後）**: 本メモが記録する「提案/上書きモデル」（LLM ベース
-> IntentAlignment による確認/上書き構造）は [decision-layer-policy-engine.md](decision-layer-policy-engine.md)
-> の設計により置き換えられ、`_confirm_with_ia` と IntentAlignment 自体は削除済みである。
-> §6「設計: 提案/上書きモデル」および「IntentAlignment には常に original action（a）を渡す」節は
-> **もはや適用されない**（判断を上書きする LLM 層が存在しないため）。
-> 一方、「STEP_UP に modified_params が乗るケースの扱い」「STEP_UP（modified_params あり）が
-> 承認された場合の最終結果」「modify_transform の narrowing 不変条件」「DEFER の解決先は DEFER を
-> 含まない」の各節は、priority 解決エンジンに移行した後も**有効な設計制約として引き続き適用される**
-> （StaticRule の priority 勝者が STEP_UP や MODIFY を返す場合の扱いは変わっていない）。
+> **この文書はアーカイブである。** 本メモが記述した提案/上書きモデルは #112（Phase A）により
+> 置き換えられ、無効になった。歴史的記録として保存する。現行の設計は
+> [decision-layer-policy-engine.md](decision-layer-policy-engine.md)、AARM 論文の読みは
+> [docs/aarm/](../aarm/) を参照。
 >
-> **この文書の位置づけ（Phase A 以前の記録として）**: これは laarma の**確定した設計方針**を記録する設計メモである。
+> **この文書の位置づけ**: これは laarma の**確定した設計方針**を記録する設計メモである。
 > AARM 仕様が明言していること、laarma の現状、そして仕様の空白部分に対する laarma の設計判断を、
 > それぞれ区別して記録する。本メモの方針は合意済みであり、実装はこの方針に従う。
 >

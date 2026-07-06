@@ -68,50 +68,6 @@ rules:
         - param_matches:
             path: 'database'
 
-  # 以下2組は #112 Phase A の同一 priority 競合(R3(b))の回帰テスト専用フィクスチャ。
-  # benchmark_data.jsonl の defer_priority_conflict_deny_allow / defer_priority_conflict_modify_modify
-  # からのみ発火するよう、テスト専用のファイル名にのみマッチさせている。
-
-  - id: _test_priority_conflict_deny
-    decision: DENY
-    reason: "テスト専用: 同一 priority 競合の DENY 側。"
-    priority: 5
-    conditions:
-      tool: delete_file
-      param_matches:
-        path: '^conflict_target\.txt$'
-
-  - id: _test_priority_conflict_allow
-    decision: ALLOW
-    reason: "テスト専用: 同一 priority 競合の ALLOW 側。"
-    priority: 5
-    conditions:
-      tool: delete_file
-      param_matches:
-        path: '^conflict_target\.txt$'
-
-  - id: _test_priority_conflict_modify_a
-    decision: MODIFY
-    reason: "テスト専用: 同一 priority 競合の MODIFY 側 A（path を変換）。"
-    priority: 5
-    conditions:
-      tool: write_file
-      param_matches:
-        path: '^conflict_modify_target\.txt$'
-    modify_transform:
-      path: basename
-
-  - id: _test_priority_conflict_modify_b
-    decision: MODIFY
-    reason: "テスト専用: 同一 priority 競合の MODIFY 側 B（content を変換、path とはキーが重ならない）。"
-    priority: 5
-    conditions:
-      tool: write_file
-      param_matches:
-        path: '^conflict_modify_target\.txt$'
-    modify_transform:
-      content: to_relative
-
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:
   pii_keywords:

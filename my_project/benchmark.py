@@ -60,6 +60,9 @@ class BenchmarkCase:
     # 非 None のとき、expected_decision とのミスマッチは fail ではなく informational として
     # 扱う（値は「いつ回復する見込みか」の注記、例: "Phase B"。ロジックには使わない）。
     known_regression_until: str | None = None
+    # 非 None のとき、デフォルトの policy.yaml ではなくこのパス（my_project/ からの相対）を
+    # ロードする。回帰テスト専用ルールを配布用 policy.yaml に混在させないためのフィクスチャ差し替え。
+    policy_file: str | None = None
     note: str | None = None  # ケースの検証意図・素性の説明（ロジックには使わない）
 
 
@@ -79,6 +82,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 expected_modified_params=data.get("expected_modified_params"),
                 identity=data.get("identity"),
                 known_regression_until=data.get("known_regression_until"),
+                policy_file=data.get("policy_file"),
                 note=data.get("note"),
             ))
     return cases
@@ -139,7 +143,8 @@ def run_case(case: BenchmarkCase) -> tuple[Decision, dict[str, Any] | None, floa
         .sign_agent(_BENCHMARK_AGENT_KEY)
         .sign_service(_BENCHMARK_SERVICE_KEY)
     )
-    policy = load_policy(_POLICY_PATH)
+    policy_path = Path(__file__).parent / case.policy_file if case.policy_file else _POLICY_PATH
+    policy = load_policy(policy_path)
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,

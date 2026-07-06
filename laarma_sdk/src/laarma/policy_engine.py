@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 from .environment import EnvironmentContext
 from .models import Action, AuthorizationResult, Decision, SessionContext
@@ -108,7 +108,7 @@ class PolicyEngine:
     def __init__(
         self,
         policy: Policy | None = None,
-        transform_registry: "dict[str, object] | None" = None,
+        transform_registry: "dict[str, Callable[[str], str]] | None" = None,
     ) -> None:
         self._policy   = policy or DEFAULT_POLICY
         self._registry = transform_registry or {}
@@ -187,7 +187,10 @@ class PolicyEngine:
                 )
 
             winner = resolution.winner
-            assert winner is not None  # conflict_group が None なら winner は必ず設定される
+            if winner is None:
+                # _resolve_priority() の不変条件: conflict_group が None なら winner は必ず設定される。
+                # ここに来るのは _resolve_priority() 自体にバグがある場合のみ。
+                raise RuntimeError("_resolve_priority() が winner・conflict_group のどちらも返しませんでした。")
             decision = Decision(winner.decision)
 
             if decision == Decision.DENY:

@@ -33,11 +33,7 @@ def _fields_from_entry(entry: dict) -> dict:
         "decision":            entry["decision"],
         "reason":              entry["reason"],
         "modified_params":     entry.get("modified_params"),
-        # "intent_alignment" はこの SDK が過去に決定判定 LLM を持っていた頃のデータクラスの
-        # デフォルト値（#112 Phase A で廃止）。to_dict() は decision_source を常に出力するため、
-        # この特定文字列フォールバックは現行コードの受領書検証では使われないが、
-        # decision_source フィールド導入以前の古い形式の監査ログを検証できるよう残す。
-        "decision_source":     entry.get("decision_source", "intent_alignment"),
+        "decision_source":     entry.get("decision_source"),
         "policy_rule_id":      entry.get("policy_rule_id"),
         "deferral_reason":     entry.get("deferral_reason"),
         "proposed_decision":   entry.get("proposed_decision"),

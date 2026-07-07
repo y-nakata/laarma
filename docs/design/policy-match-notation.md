@@ -32,10 +32,23 @@ aarm.dev 公式ガイドの既存記法と対照し、寄せられるところ�
 
 ## 2. 三者対照
 
-### 【論文】AARM 論文の match 記法（規範）
+### 【論文】δ の定義（式2）と match 記法（規範）
 
-論文は Policy Structure（式3: π:(a,C)）の具体例を、`action.*` と `context.*` を比較演算子と `AND` で
-連ねた述語として示す。context-dependent deny の例:
+まず δ の定義を確認する。論文 IV. PROBLEM FORMALIZATION の式(2) は、Context Accumulator が保つ
+コンテキスト C を `Cn = Cn−1 ∪ {an, on, δn}` と定め、δ を5つの派生シグナルの集合とする:
+
+- **Data classification**: アクセスした情報の機微レベル（PUBLIC / INTERNAL / CONFIDENTIAL / PII）
+- **Semantic distance**: 現在のアクションが元リクエストからどれだけドリフトしたか
+- **Scope expansion**: 想定スコープ外のリソースにアクセスしているか
+- **Entity set**: セッションで参照されたユーザ・アカウント・リソース
+- **Confidence level**: 現在のアクションを評価することへのシステムの confidence（allow/deny/defer 決定に用いる）
+
+**要点: confidence_level は δ の一員であり、data_classification・semantic_distance・scope_expansion・
+entity_set と同格**である。「計算されたスコア」と「セッション文脈」という区別は δ の内部には無く、5つとも
+等しく δ のメンバーである。
+
+そして論文の Policy Structure（式3: π:(a,C)）の具体例は、`action.*` と `context.*` を比較演算子と `AND` で
+連ねた述語として示す。C は δ を含む（式2）ので、δ の参照は `context.` の下に現れる。context-dependent deny の例:
 
 ```
 policy: block_external_after_pii
@@ -63,7 +76,8 @@ reason: "Forbidden: DROP DATABASE"
 
 論文記法から読み取れる規範的な点:
 
-- **参照対象は `action.*`（tool / operation / params）と `context.*`（data_classification 等）** に分かれる。
+- **δ は C の一部（式2）であり、match では `context.` の下に参照される**（`context.data_classification CONTAINS "PII"`）。5つの δ メンバーはいずれも `context.<signal>` として現れる。
+- **参照対象は `action.*`（tool / operation / params）と `context.*`（δ）** に分かれる。
 - **演算子は `==` / `NOT IN` / `CONTAINS` / `MATCHES`** など。集合には `CONTAINS`、正規表現には `MATCHES`。
 - **`priority` は第一級フィールド**。forbidden に大きな値（1000）、context-dependent に中程度（100）。
 - 結合は **`AND`（連言）**。
@@ -76,13 +90,17 @@ reason: "Forbidden: DROP DATABASE"
 
 - `tool` / `operation`（論文の `action.tool` / `action.operation`）。
 - `parameters`: パラメータ値の述語。`{ external: true }` `{ contains: "URGENT" }` のような述語オブジェクト。
-- `context`: セッション文脈。`data_classification: [PII, PHI]`、`prior_actions: { contains: "db.query" }`。
+- `context`: セッション文脈（δ）。`data_classification: [PII, PHI]`、`prior_actions: { contains: "db.query" }`。
 - `risk_signals`: 計算されたリスクスコアの閾値比較。`injection_score: { gt: 0.8 }` `anomaly_score: { gt: 0.7 }`。
 
 演算子は値の位置に `{ 演算子: 値 }` を置く述語オブジェクト方式（`{ gt: 0.8 }` / `{ contains: ... }` /
 `{ external: true }`）。decision は `action:` キー（`ALLOW` / `DENY` / `MODIFY` / `STEP_UP`）。この他に
 `modifications`（MODIFY 変換先）、`approvers` / `timeout` / `timeout_action`（STEP_UP）、`constraints`
 （allowlist・rate limit）を持つ。
+
+注意: 公式の `risk_signals`（`injection_score` / `anomaly_score`）は **δ の5メンバーには含まれない別物**
+（injection 検知・異常スコアという危険性寄りのシグナル）で、laarma はまだ持たない。δ を `context` に置くのは
+論文式(2)・公式ともに一致するが、`risk_signals` は δ とは別レイヤーである。
 
 ### laarma 現行の match 記法
 
@@ -94,7 +112,7 @@ laarma 現行（`policy.yaml` / `_match_conditions`）は、公式にさらに�
 - `any_of` / `none_of`: 条件のグルーピング。
 - `priority`（#112 Phase A で追加、論文と整合）。
 
-`context`（δ 参照）区画と、計算スコアの閾値比較区画は**まだ無い**。これが Phase B で足す対象。
+δ を参照する `context` 区画は**まだ無い**。これが Phase B で足す対象（式2 の δ 5メンバーを `context.` 配下で参照できるようにする）。
 
 ### 対照表
 
@@ -102,8 +120,8 @@ laarma 現行（`policy.yaml` / `_match_conditions`）は、公式にさらに�
 |---|---|---|---|
 | tool / operation | `action.tool` / `action.operation` | `tool` / `operation` | `tool` のみ |
 | パラメータ述語 | `action.params.X == / NOT IN / MATCHES` | `parameters: { external / contains / ... }` | `param_matches`（正規表現） |
-| セッション文脈 δ | `context.data_classification CONTAINS` | `context: { data_classification: [...] }` | **無し（Phase B で追加）** |
-| 計算スコア δ | （実例に明示なし） | `risk_signals: { injection_score: { gt } }` | **無し（Phase B で追加）** |
+| δ 参照（式2 の5メンバー） | `context.<signal>`（例に出るのは `context.data_classification`。5メンバーは全て C の一部＝式2） | `context: { data_classification: [...] }`（δ は `context` 配下） | **無し（Phase B で `context.` 配下に追加）** |
+| risk_signals（δ 外の危険性スコア） | （実例なし） | `risk_signals: { injection_score: { gt } }`（δ とは別レイヤー） | 無し（laarma の δ には使わない） |
 | priority | 第一級（100 / 1000） | （例では未使用） | 第一級（Phase A で追加） |
 | 結合 | `AND`（連言） | ブロックの AND | 条件の AND |
 | decision キー | `decision` | `action` | `decision` |
@@ -120,72 +138,79 @@ laarma 現行（`policy.yaml` / `_match_conditions`）は、公式にさらに�
   静的な固定値で書く方式で、laarma の `basename`（path サニタイズ）のような関数変換を表現できない。
 - **同一 priority 競合 → DEFER（R3(b)）を扱っていない**。公式の例は priority すら使っておらず、
   複数ルールがマッチしたときの解決を示さない。laarma・論文が中心に据えた R3(b) が公式には無い。
-- **confidence を含まない**。公式の計算スコア区画 `risk_signals` は `injection_score` / `anomaly_score`
-  という**危険性寄り**のスコアで、laarma が §5 で「評価可能性（危険性とは独立）」と定義した confidence を
-  含まない。したがって **confidence を `risk_signals` に入れることは公式互換にはならない**——公式に無い
-  ものを危険性寄りの名前の下にぶら下げ、意味論的に誤った `risk_signals` 拡張を足すだけになる。
+- **δ の一員 confidence_level を扱っていない**。公式の `context` 例（data_classification・prior_actions）にも
+  `risk_signals` 例（injection_score・anomaly_score）にも confidence_level は現れない。式2 では
+  confidence_level は δ の一員なので、公式の例は δ を網羅していない。なお公式の `risk_signals` は δ 外の
+  危険性寄りスコアであり、laarma の δ（confidence を含む）をそこに載せる話ではない（§4 参照）。
 
 ---
 
 ## 4. laarma の選択
 
-**論文を規範とし、公式ガイドをその構造化 YAML 実装として参照する。** 公式の区画分け（`context` と
-計算スコア区画の切り分け、述語オブジェクト `{ 演算子: 値 }`）は借りるが、公式が扱えていない laarma の
-深さ（関数変換 MODIFY・1パス terminal・競合 DEFER）は laarma の拡張として維持する。そのうえで
-Phase B の δ 参照記法を次のように定める。
+**論文を規範とし、公式ガイドをその構造化 YAML 実装として参照する。** 公式の `context` 配下への δ 参照
+（論文式2 と一致）と、述語オブジェクト `{ 演算子: 値 }` は借りるが、公式が扱えていない laarma の深さ
+（関数変換 MODIFY・1パス terminal・競合 DEFER）は laarma の拡張として維持する。そのうえで Phase B の
+δ 参照記法を次のように定める。
 
 ### (a) δ は部分踏襲——δ 参照だけ公式風に足し、既存 `param_matches` は温存
 
-既存の `param_matches`（正規表現）は温存し、δ 参照区画だけを新設する。記法全体を公式準拠に作り直す
-（`param_matches` → `parameters: { matches: }` 等への移行、`operation` 分離）ことは Phase B のスコープに
-含めず、**別 Issue** とする。Phase B のスコープを「δ 追加」に保つ。
+既存の `param_matches`（正規表現）は温存し、δ 参照（`context.` 配下）だけを新設する。記法全体を公式準拠に
+作り直す（`param_matches` → `parameters: { matches: }` 等への移行、`operation` 分離）ことは Phase B の
+スコープに含めず、**別 Issue（#121）** とする。Phase B のスコープを「δ 追加」に保つ。
 
-### (b) data_classification は `context` 区画（論文・公式一致）
+### (b) δ は全て `context.` の下に置く（式2 の帰結）
 
-論文の `context.data_classification CONTAINS "PII"`、公式の `context: { data_classification: [PII] }` は
-一致する。laarma もこれに合わせ、セッション文脈由来の δ（data_classification 等）は **`context` 区画**に
-集合表現で置く。回帰 `step_up_pii_delete` の回復対象。
+論文式(2) は δ の5メンバー（data_classification・semantic_distance・scope_expansion・entity_set・
+confidence_level）を等しく C の一部とし、match ではそれらを `context.` の下に参照する
+（`context.data_classification CONTAINS "PII"`）。したがって laarma も δ を全て `context.` 配下に置く。
+**data_classification や semantic_distance だけを `context` に置き、confidence を別区画に出す、という
+分割はしない**——5つとも同格の δ なので、区画は `context` 一つで足りる。
 
-### (c) semantic_distance / confidence は計算スコアの閾値比較。ただし confidence は中立区画
+- `context.data_classification`（集合参照、`CONTAINS` 相当。論文・公式一致。回帰 `step_up_pii_delete` の回復対象）
+- `context.semantic_distance`（閾値参照 `{ gt: 0.4 }` 相当。回帰 `deny_dynamic_delete_intent_mismatch` の回復対象）
+- `context.scope_expansion`（真偽/閾値参照）
+- `context.confidence_level`（閾値参照 `{ lt: 0.4 }` 相当。回帰 `defer_dynamic_ambiguous_delete` の回復対象）
 
-semantic_distance と confidence は「計算されたスコアの閾値比較」で、公式の `risk_signals` 区画の形
-（`{ gt: 0.4 }` / `{ lt: 0.4 }`）が素直。ただし §3 の通り **confidence を `risk_signals`（危険性寄りの名前）に
-入れない**。confidence=評価可能性という §5 の線引きを記法でも保つため、**中立名の別区画**に置く。
+### (c) confidence を危険性区画（`risk_signals`）に入れない——別区画を作るのではなく、δ として context に置く
 
-- semantic_distance は「意図からのドリフト」で危険性寄りの解釈が可能なため、`risk_signals` 相当の区画に
-  置く余地がある（回帰 `deny_dynamic_delete_intent_mismatch` の回復対象）。
-- confidence は評価可能性軸なので、危険性区画とは分けた中立区画に置く（回帰 `defer_dynamic_ambiguous_delete`
-  の回復対象）。
+以前の検討で「confidence を公式の `risk_signals` に入れず中立の別区画に置く」としたが、これは誤りだった。
+式(2) に照らせば、confidence_level は δ の一員なので、他の δ と同じく `context.confidence_level` に置くのが
+素直な帰結で、**そもそも `risk_signals` のような別区画を laarma の δ に用いる必要がない**。
 
-具体的な区画名（`risk_signals` を採るか laarma 独自の中立名にするか、confidence 区画を何と呼ぶか）は、
-共通機構の設計（`_match_conditions` への C 配線・演算子表現・未 populate 時の R3(a) 扱い）と合わせて
-Phase B 共通機構ブリーフで確定する。本メモは「confidence を危険性区画に混ぜない」という制約までを定める。
+confidence=評価可能性（危険性とは独立、§5 / [risk-classification.md](risk-classification.md)）という線引きは、
+区画を分けることではなく、**δ を式2 通り素直に `context` に置く**ことで自然に保たれる。危険性寄りの
+`risk_signals`（injection_score 等）は δ 外の別レイヤーであり、laarma がそれを導入するかは別の話（δ 参照とは
+無関係）。
+
+具体的な演算子表現（`{ gt: 0.4 }` を採るか、既存の条件記法に合わせるか）、`context.<signal>` の各値の型、
+未 populate 時の R3(a) 扱いは、共通機構の設計（`_match_conditions` への C 配線）と合わせて Phase B 共通機構
+ブリーフで確定する。本メモは「δ は全て `context.` 配下」「confidence を危険性区画に混ぜない」までを定める。
 
 ---
 
 ## 5. 決定事項
 
 - 記法は**論文を規範・公式を構造化参照**として寄せる。意味論は現行の AND 連言を踏襲。
-- **δ 部分踏襲**: δ 参照区画だけ新設、既存 `param_matches` 温存。記法全体の公式準拠リファクタは**別 Issue**。
-- **data_classification は `context` 区画**（論文・公式一致、集合表現）。
-- **confidence は危険性区画（`risk_signals` 等）に入れない**。中立区画に置く（評価可能性軸の保持）。
-- 区画名・演算子表現・未 populate 時の R3(a) 扱いは Phase B 共通機構ブリーフで確定する。
+- **δ 部分踏襲**: δ 参照（`context.` 配下）だけ新設、既存 `param_matches` 温存。記法全体の公式準拠リファクタは**別 Issue（#121）**。
+- **δ は全て `context.` の下に置く**（式2 の帰結）。data_classification・semantic_distance・scope_expansion・confidence_level を同格の δ として `context.<signal>` で参照する。
+- **confidence は別区画を作らず `context.confidence_level` に置く**。危険性区画（`risk_signals` 等）には入れない（そもそも δ に別区画は不要）。危険性寄りの `risk_signals` は δ 外の別レイヤーで、導入可否は δ 参照と無関係。
+- 演算子表現・各値の型・未 populate 時の R3(a) 扱いは Phase B 共通機構ブリーフで確定する。
 
 ### 別 Issue 送り（本メモのスコープ外）
 
 - 記法全体の公式準拠リファクタ（`param_matches` → 述語オブジェクト、`operation` 分離、`constraints` /
-  `approvers` / `timeout` 等の公式構造の導入）。
+  `approvers` / `timeout` 等の公式構造の導入）: **#121**。
 - forbidden の扱いの論文差分: 論文は forbidden を priority 1000 として**同じ priority 空間**で表現するが、
-  laarma は denied_tools を priority システムの**外側**の独立チェックとしている（#112 Phase A の設計判断）。
-  この思想差を将来見直すか否かは別途。
+  laarma は denied_tools を priority システムの**外側**の独立チェックとしている（#112 Phase A の設計判断）:
+  **#122**。
 
 ---
 
 ## 関連
 
-- 論文解釈の土台: [docs/aarm/classification-and-policy-model.md](../aarm/classification-and-policy-model.md)（Policy Structure・式3・Table I）
+- 論文解釈の土台: [docs/aarm/classification-and-policy-model.md](../aarm/classification-and-policy-model.md)（Policy Structure・式3・Table I）、および式2（δ の定義）
 - Phase B の実装設計: [decision-layer-policy-engine.md](decision-layer-policy-engine.md)（§2 組み替え後の構造・§3 条件1〜15 の移行表・§5 confidence=評価可能性）
 - confidence ≠ 危険性: [risk-classification.md](risk-classification.md)
 - 環境条件（デモフィクション）: [environment-demo-fiction.md](environment-demo-fiction.md)
-- 参照: AARM 論文 arXiv:2602.09433（Policy Structure の実例）、aarm.dev 公式ドキュメント github.com/aarm-dev/docs（guides/first-policy.mdx の match 記法）
-- 関連 Issue: #112（Phase B で δ 参照 match predicate を実装）、#77（confidence 較正）、#100（composite risk = 危険性軸）
+- 参照: AARM 論文 arXiv:2602.09433（IV. PROBLEM FORMALIZATION 式2 の δ 定義、Policy Structure の実例）、aarm.dev 公式ドキュメント github.com/aarm-dev/docs（guides/first-policy.mdx の match 記法）
+- 関連 Issue: #112（Phase B で δ 参照 match predicate を実装）、#121（記法全体の公式準拠リファクタ）、#122（forbidden の priority 思想差）、#77（confidence 較正）、#100（composite risk = 危険性軸）

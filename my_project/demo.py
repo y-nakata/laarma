@@ -86,7 +86,7 @@ def run_scenario(
     print(f"\n  《《《 AARM サマリ 》》》")
     print(f"  総アクション数    : {ctx['action_count']}")
     print(f"  確信度          : {sig.get('confidence_level', '-')}")
-    print(f"  データ分類        : {sig.get('data_classifications', [])}")
+    print(f"  データ分類        : {sig.get('data_classification', [])}")
     print(f"  セマンティック距離: avg={sd.get('average', '-')} max={sd.get('max', '-')}")
     print(f"  レシート:")
     for r in runtime.receipts:

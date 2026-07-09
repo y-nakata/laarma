@@ -178,7 +178,7 @@ class ContextAccumulator:
         avg         = sum(d) / len(d) if d else 0.0
         drift_trend = round(d[-1] - avg, 3) if d else 0.0
         return {
-            "data_classifications":     sorted(set(self._data_classifications)),
+            "data_classification":      sorted(set(self._data_classifications)),
             "semantic_distance":        {
                 "current":    d[-1] if d else 0.0,
                 "average":    round(avg, 3) if d else 0.0,

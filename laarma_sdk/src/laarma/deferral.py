@@ -44,7 +44,7 @@ You receive:
 - original_deferral_reason: why the first evaluation was deferred
 - user_intent: the user's original request
 - recent_actions: prior actions in this session
-- derived_signals: data_classifications, semantic_distance, scope_expansion_detected
+- derived_signals: data_classification, semantic_distance, scope_expansion_detected
 - proposed_action: the action pending execution
 - additional_context: supplementary information gathered after deferral
 

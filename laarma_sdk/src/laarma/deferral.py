@@ -44,7 +44,11 @@ You receive:
 - original_deferral_reason: why the first evaluation was deferred
 - user_intent: the user's original request
 - recent_actions: prior actions in this session
-- derived_signals: data_classification, semantic_distance, scope_expansion_detected
+- derived_signals: per-step signal values (δ) — data_classification, semantic_distance
+  (this step's embedding-cosine scalar), scope_expansion_detected
+- drift_observation: intent-drift tracking derived from the distance history —
+  average, max, recent_avg, drift_trend (current - average), and history (the raw
+  distance series)
 - proposed_action: the action pending execution
 - additional_context: supplementary information gathered after deferral
 
@@ -126,6 +130,7 @@ class DeferralResolver:
                     "user_intent":              _truncate(context_summary.get("user_intent", ""), _MAX_INTENT_LEN),
                     "recent_actions":           _sanitize_recent_actions(context_summary.get("recent_actions", [])),
                     "derived_signals":          context_summary.get("derived_signals", {}),
+                    "drift_observation":        context_summary.get("drift_observation", {}),
                     "proposed_action": {
                         "tool_name":  action.tool_name,
                         "parameters": _sanitize_params(action.parameters),

@@ -17,7 +17,7 @@
 
 ---
 
-## 1. 論文には DEFER のトリガーが二箇所にあり、内容が異なる
+## 1. 論文には DEFER のトリガーが二箇所にあり、抽象度が異なる
 
 ### 【論文】FRAMEWORK 章（§IV-B-4）の DEFER 記述
 
@@ -42,7 +42,7 @@ R3 は deferral が MUST triggered となる条件を3つ挙げる:
 
 さらに「The conditions triggering deferral MUST be documented and auditable（DEFER をトリガーする条件は文書化され監査可能でなければならない）」。
 
-### 【解釈】二つの記述は完全には整合しない
+### 【解釈】二つの記述は抽象度が異なる（矛盾ではなく informative / normative の二層）
 
 FRAMEWORK 章の4項目と CONFORMANCE 章の (a)(b)(c) を対応させると、素直に対応しない部分がある:
 
@@ -58,7 +58,19 @@ FRAMEWORK 章の4項目と CONFORMANCE 章の (a)(b)(c) を対応させると、
 - **2（矛盾する文脈信号）と 3（複合リスクの不明さ）は、(a)(b)(c) に素直に対応しない**。特に 3 は (a)(b)(c) のどれでもない。2 の「conflicting contextual signals」は (b)「ポリシー矛盾」と紛らわしいが、**文脈信号（δ）の矛盾**と**ポリシー設計の矛盾**は別物である。
 - 逆に **(b)（同一 priority のポリシー矛盾）は FRAMEWORK 章の4項目に対応がない**。(b) は文脈側の問題ではなくポリシー設計側の問題で、FRAMEWORK の「状況」リストには現れない。
 
-**読み方**: CONFORMANCE 章の (a)(b)(c) は「MUST triggered when」という**最小の実装要件**、FRAMEWORK 章の4項目は「どういう状況が DEFER に値するか」という**現象の記述**、と解釈すれば、後者がより広く前者は最小限、という包含関係とも読める。ただし論文はこの包含関係を明示していない（これは解釈であって論文の記述ではない）。いずれにせよ、**(a)(b)(c) だけを DEFER の設計根拠にすると、FRAMEWORK 章の「矛盾する文脈信号」「複合リスクの不明さ」を取りこぼす**。
+**これは論文の欠陥・矛盾ではなく、規格文書の標準的な二層構造である。** FRAMEWORK 章は DEFER に値する状況を**ナラティブ・抽象的**に描く informative な記述、CONFORMANCE 章 R3 は適合性を判定するための**客観的に検証可能**な normative な記述で、両者は抽象度が異なる。規格起草のドクトリンはこの二層を意図的に分ける——ISO/IEC Directives Part 2 は要件を「客観的に検証可能な基準」と定義して検証可能なものだけを規範条項に含めよと定め、W3C QA Framework は「informative なテキストは適合の合否を決めない／各 MUST 要件からテスト表明を導け」とする。すなわち **informative（ナラティブ）が normative（検証可能条項）より広い射程を持つのは、よく設計された規格では正常であり、適合性は検証可能条項に対してのみ判定される**。要求工学ではこれをゴール（抽象・宣言的）の operationalize（検証可能要件への具体化）と呼び（goal-oriented requirements engineering）、形式手法では抽象レベルの振る舞いの一部だけを具体レベルが捉える構造を retrenchment と呼ぶ。R3 が §IV-B-4 を部分的にしか掬わないのは、この意味での under-specification（informative over-reach）であって、矛盾ではない。
+
+**適合性の帰結**: したがって、適合性（conformance）は normative な R3(a)(b)(c) に対してのみ判定される。FRAMEWORK 章の informative な記述のうち R3 に対応しないもの（#2「矛盾する文脈信号」・#3「複合リスクの不明さ」）は、適合性の要件ではなく、それを追加で実装しなくても AARM に conformant である。むしろ informative の記述を根拠に「これも満たすべき要件だ」と読み取ることは、informative に規範的効力を持たせることであり、規格の読み方として誤りである。実装が FRAMEWORK 章まで捉えたい場合、それは AARM の適合要件だからではなく、実装側の**独自の設計選択**として行う（laarma がそうするかは [../design/decision-layer-policy-engine.md](../design/decision-layer-policy-engine.md) の領分。本メモ＝論文の読みとしては「適合性としては R3 で足りる」までを述べる）。なお #3「不完全な履歴ゆえの複合リスク」が (a)(b)(c) に対応しないのは、有限のプレフィックス（それまでの履歴）からは複合リスクを確定できない——ランタイム検証でいう monitorable でない性質＝判定保留（inconclusive）——という側面もある（[research/](research/) 参照）。
+
+### 【解釈】FRAMEWORK は未知の未知まで含みうるが、DEFER が扱えるのは既知の未知（未知の未知は DENY）
+
+FRAMEWORK 章の抽象的記述、特に #4「安全性がセッション未取得の情報に依存する」は、**何を見るべきかすら特定しない広さ**を持ち、読みようによっては *未知の未知*（関連性がそもそもポリシーに表現できない情報）まで含む。一方 CONFORMANCE 章 R3(a) は具体的で、「match predicate が参照する context フィールドが未 populate」——参照先はポリシーに**書けている（何を見るべきかは既知）**が値が未確定、という *既知の未知* に限定される。しかも R3(a) の「未 populate を検知して DEFER する」主体は**ルールを評価する runtime システム**であって、ルールは参照するだけである（ルールが自分の参照先の欠落を表明するのではない）。
+
+この既知/未知の未知の区別は、DEFER という動作の性質から導かれる。**DEFER（＝特定された情報が揃うまで実行を保留し、追加取得を待つ）が意味を持つのは、待つべき情報が特定できる既知の未知に限られる。** 決定理論はこれを裏付ける: value of information は**既に表現された状態空間の中**の不確実性を解消する価値としてのみ定義され（Howard 1966）、標準的な状態空間モデルは unawareness を表現できず（Dekel–Lipman–Rustichini 1998）、状態空間を拡張する価値（value of awareness）と空間内の情報価値（value of information）は別物である（Quiggin 2016）。すなわち「情報を待って解決する」動作は、待つべき対象が状態空間に表現されていること＝既知の未知を前提とする。
+
+**未知の未知——参照先をルールに書けず、待つべき対象が特定できないもの——は、DEFER の対象にならない。** 待つべき具体的対象が無いため保留しても解決の見込みが無く、fail-closed の原則に従って DENY に落ちる。これは AARM の fail-closed 姿勢（R4 の「timeout は DENY、fail-open は許されない」）とも、laarma の実装（予期しない例外は DENY）とも整合する。
+
+**注意（用語の混同を避ける）**: AARM の DEFER は「特定情報を待つ保留」という具体的動作であって、「棄権（abstention）一般」ではない。機械学習の reject option では、分布外・未知の入力に棄権する *novelty rejection* が正当な棄権として認められるが、それは AARM の語彙では DEFER ではなく DENY／エスカレート側に対応する。DEFER を「棄権一般」と読み替えて「未知の未知にも DEFER しうる」と結論するのは、指す動作の異なるものを同一視するカテゴリ錯誤である。
 
 ### 【解釈】(c) は任意実装なので (a)(b)(c) は MECE ではない
 
@@ -109,7 +121,7 @@ severity と confidence は独立で、高 severity かつ低 confidence（危�
 - **1 高影響だが confidence 不足**: 「高影響」は危険性軸、「confidence 不足」は評価可能性軸。両者の組み合わせ。
 - **2 曖昧な意図・矛盾する文脈信号**: 評価可能性軸（判定が確証できない）。
 - **3 複合リスクの不明さ**: 二軸に分解。**複合リスクの大きさ**は危険性軸、**それが「不明」であること**は評価可能性軸。高リスクかつ低 confidence（危険だが評価しきれない）がありうる。
-- **4 未取得情報依存**: 評価可能性軸だが、CONFORMANCE (a)（未 populate context 参照）で決定論的に捉わる性質。
+- **4 未取得情報依存**: 評価可能性軸だが、参照先がポリシーに書けている既知の未知に限り CONFORMANCE (a)（未 populate context 参照）で捉わる（未知の未知は §1 の通り DEFER の対象外で DENY）。
 
 このうち「危険性」に属する部分（1 の高影響、3 の複合リスクの大きさ）は confidence に混ぜず、危険性軸として
 扱うべき、というのが二軸分離から導かれる読みである。
@@ -156,7 +168,9 @@ R4 から言えるのは**有界性**まで——cascading deferral は設定上
 ## 関連
 
 - 分類フレームワーク全体の解釈: [classification-and-policy-model.md](classification-and-policy-model.md)
+- 本メモの外部理論の裏付け調査: [research/](research/)（規格の informative/normative 二層・既知/未知の未知・monitorability・value of information 等の学術的裏付けと非存在の整理）
 - laarma の設計判断（本メモを土台とする）: [../design/decision-layer-policy-engine.md](../design/decision-layer-policy-engine.md)（DEFER トリガーの統合・confidence 計算・多層防御 LLM）、[../design/risk-classification.md](../design/risk-classification.md)（confidence ≠ 危険性）
 - AARM 論文 arXiv:2602.09433: §IV-B-4（FRAMEWORK 章 DEFER）、R3（DEFER トリガー a/b/c）、R4（DEFER 後の要件）、§IV-C（δ 定義・confidence）
+- 参照した外部理論（詳細と出典は research/）: 規格の informative/normative 二層（ISO/IEC Directives Part 2、W3C QA Framework）、ゴール指向要求工学、retrenchment（Banach & Poppleton 1998）、value of information と unawareness（Howard 1966、Dekel–Lipman–Rustichini 1998、Quiggin 2016）、monitorability（Bauer–Leucker–Schallhart 2011）、reject option（Hendrickx et al. 2024＝DEFER と棄権一般の混同を避ける文脈で参照）
 - 参照した業界実践: Burp Scanner の severity × confidence 二軸分類（PortSwigger）
 - 関連 Issue: #89（DEFER 解決機構）、#77（confidence 較正）、#100（composite risk = 危険性軸）、#94（signal/decision 分離）

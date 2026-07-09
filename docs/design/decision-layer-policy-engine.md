@@ -104,7 +104,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 1 | action が意図と矛盾/無相関（読めと言われ write/delete） | semantic distance のポリシー閾値参照（`semantic_distance > 閾値 → DENY`） |
 | 2 | action_matches_intent=false かつ distance>0.4 で破壊/書込 | distance + tool risk のポリシー参照 |
 | 3 | scope_expansion 検出かつ意図に正当化なし | **#99**（scope_expansion 産出の再設計）に委ねる既知の穴 |
-| 4 | Compositional Risk（アクション系列が攻撃ベクトル） | **#100**（composite risk）。危険性軸の拡張。加えて FRAMEWORK 章では DEFER トリガーの一つでもある（§4） |
+| 4 | Compositional Risk（アクション系列が攻撃ベクトル） | **#100**（composite risk）。危険性軸の拡張。FRAMEWORK 章では DEFER に値する状況の一つとして挙がるが、実装に下ろすと DEFER として拾えず DENY／#100 に振り分けられる（§4） |
 | 5 | action_matches_intent=true / 意図が対象を明示 | distance 小 + 危険信号なし → ALLOW baseline |
 | 6 | semantic_distance < 0.3 | distance のポリシー閾値参照 |
 | 7 | PII/CONFIDENTIAL を含まない | data_classification のポリシー参照 |
@@ -121,31 +121,39 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 
 ---
 
-## 4. DEFER のトリガー: FRAMEWORK 章と CONFORMANCE 章の両方を設計に含める
+## 4. DEFER のトリガー: 適合性は R3、FRAMEWORK 章を拾うかは laarma の設計選択
 
-DEFER の設計にあたり、当初は CONFORMANCE 章 R3 の3トリガー (a)(b)(c) だけを見ていたが、これは不十分だった。
-論文の FRAMEWORK 章（§IV-B-4）は、DEFER に値する状況をより広く列挙しており、両者は完全には整合しない
-（詳細は `docs/aarm/deferral.md` に論文解釈として記録）。laarma の DEFER 設計は**両方を含める**。
+**適合性（conformance）は CONFORMANCE 章 R3 の (a)(b)(c) に対してのみ判定される**（`docs/aarm/deferral.md` §1）。FRAMEWORK 章（§IV-B-4）が DEFER に値する状況をより広くナラティブに列挙しているのは informative な記述で、R3 に対応しない部分は適合要件ではない——実装しなくても AARM に conformant である。したがって当初の「R3 だけだと FRAMEWORK 章を取りこぼすから両方を含めねばならない」という整理は誤りだった。**FRAMEWORK 章の状況を R3 を超えて拾うかどうかは、AARM の適合要件ではなく laarma の設計選択**である。
+
+そのうえで各状況を「laarma が拾う設計選択をするとして、具体的に実装できるか」で精査すると、拾えるものは限られる。
 
 論文の二つの記述:
 
-- **CONFORMANCE 章 R3**（MUST triggered when）: (a) match predicate が未 populate の context を参照、(b) 同一 priority で複数ポリシーが矛盾、(c) confidence スコア（実装されている場合）が閾値未満。
-- **FRAMEWORK 章**（DEFER に値する状況）: (1) 高影響だが allow/deny に十分な confidence がない、(2) 曖昧な意図または矛盾する文脈信号、(3) 不完全な履歴ゆえに不明な複合リスク、(4) 安全性がセッション未取得の情報に依存。
+- **CONFORMANCE 章 R3**（MUST・適合要件）: (a) match predicate が未 populate の context を参照、(b) 同一 priority で複数ポリシーが矛盾、(c) confidence スコア（実装されている場合）が閾値未満。
+- **FRAMEWORK 章**（informative・DEFER に値する状況）: (1) 高影響だが allow/deny に十分な confidence がない、(2) 曖昧な意図または矛盾する文脈信号、(3) 不完全な履歴ゆえに不明な複合リスク、(4) 安全性がセッション未取得の情報に依存。
 
-この二つを laarma の軸で整理すると（confidence = 評価可能性、危険性 = 別軸。§5 で後述）:
+各項の実装可能性（confidence = 評価可能性、危険性 = 別軸。§5）:
 
-- **(1) 高影響だが confidence 不足** → 「高影響」は危険性軸（ポリシー条件: destructive_tools / production 等）で表現し、confidence（evaluability）に混ぜない。「confidence 不足」の部分が R3(c) に対応。両者の**組み合わせ**が DEFER を生む。
-- **(2) 曖昧な意図・矛盾する文脈信号** → 評価可能性の問題（判定が確証できない）。confidence 低として現れる。矛盾の検出は、決定論で書けるもの（例: `params.src == params.dst`）はポリシー match で、書ききれない意味論的な矛盾（§5 の多層防御 LLM）は confidence への反映で捉える。
-- **(3) 不完全な履歴ゆえに不明な複合リスク** → 二軸に分解される。**複合リスクの大きさ**は危険性軸（#100 composite risk）、**それが「不明」であること**は評価可能性（confidence 低）。Burp Scanner が severity と confidence を独立に出すのと同じ構造で、高リスクかつ低 confidence がありうる。
-- **(4) 安全性がセッション未取得情報に依存** → R3(a)（未 populate の context 参照）で決定論的に捉わる。
+- **(1) 高影響だが confidence 不足** → 拾える。「高影響」は危険性軸（destructive_tools / production 等のポリシー条件）で表現し、「confidence 不足」は R3(c) に対応する。両者の**組み合わせ**が DEFER を生む。危険性は confidence に混ぜない。
 
-要点: DEFER を R3 の (a)(b)(c) だけで組むと、FRAMEWORK 章の「矛盾する文脈信号」「複合リスクの不明さ」を取りこぼす。laarma は両方を DEFER 設計に含める。特に「意味論的な矛盾・曖昧さ」の検出は §5 の多層防御として最初から設計に入れる。
+- **(2a) 曖昧な意図** → 拾える（設計選択）。意図が曖昧かどうかは閾値/集合の決定論述語では書けず、意味理解＝LLM でしか判定できない。これは §5「confidence 計算への LLM 活用」に合流する——LLM が曖昧さを読んで confidence（evaluability）を下げ、R3(c) の閾値を割れば DEFER になる。evaluability の定義（「意図が曖昧で評価しきれない」＝評価可能性が低い）に忠実で、confidence に入れてよいものの典型。
+
+- **(2b) 矛盾する文脈信号** → 特定可能な矛盾のみ拾い、特定不能な矛盾は拾わない。「何と何が矛盾するか」が既知の矛盾（例: `params.src == params.dst`、`copy(src, src)`）は決定論述語で書ける（既知の既知）。一方「どこかに矛盾がある気がするが何と何かは特定できない」矛盾は、LLM に問うても当たり判定ができず（何と何かを特定できていないので検証しようがない）、その出力を confidence に混ぜると confidence が「検証できない何か」で濁る。evaluability の定義に形式上は合致するが、検証不能な判定を混ぜて confidence の意味を濁すので拾わない（§5 の「confidence をゴミ溜めにしない」線引きの適用）。特定不能な矛盾は未知の未知側で、DEFER の対象にならず DENY／射程外（`docs/aarm/deferral.md` §1）。
+
+- **(3) 不完全な履歴ゆえに不明な複合リスク** → 拾える DEFER が残らない。実装に下ろすと三筋に分解され、いずれも DEFER にならない:
+  - (i) **履歴窓の不備**: 現行 IA が5履歴サマリしか LLM に渡さないため、email 送信時に先行 PII アクセスが見えず「不完全履歴で DEFER」となるのは、履歴窓を広げれば消える**実装の不備**であって FRAMEWORK 章の状況ではない。PII アクセスは C に蓄積される既知の事実で、これまでアクセスが無ければその時点の email 送信にリスクは無い。
+  - (ii) **起きていない事実を待つ**: 「まだ起こっていないこと」に対し履歴が不完全だから DEFER、は待つべき対象が無く、未知の未知を DEFER するのと同じ不条理（`docs/aarm/deferral.md` §1）。
+  - (iii) **既知悪性パターンへの接近**: 「あと一手で既知の悪性パターンに完全一致しそうだから DEFER」は、DEFER する限りアクションが実行されずパターンは永久に完成しない——待つのでなく**止める（DENY）**べき。パターンが既知なら既知の**危険性**であり、DEFER（評価可能性）でなく危険性軸で扱う（#100 composite risk）。
+
+- **(4) 安全性がセッション未取得情報に依存** → 参照先がポリシーに書けている既知の未知なら R3(a)（未 populate の context 参照）で捉わる。未知の未知（参照先を書けない）は DEFER の対象でなく DENY（`docs/aarm/deferral.md` §1）。なお laarma の同期モデルでは δ は評価前に必ず算出され「未 populate」が生じないため、R3(a) は現状非発生（並行/非同期実行を採れば発生しうる）。
+
+**まとめ**: 適合性は R3(a)(b)(c) で足りる。laarma が FRAMEWORK 章を超えて拾う設計選択のうち、実装できるのは (1) の組み合わせと (2a) 曖昧な意図（§5 の confidence-LLM 経由）に絞られる。(2b) の特定不能な矛盾と (3) 複合リスクは、拾おうとしても実装可能性・検証可能性・DEFER/DENY の区別の壁に当たり、DEFER として拾わない（該当する筋は決定論ポリシー・DENY・#100 に振り分ける）。したがって §5 の confidence 計算への LLM 活用は、「曖昧な意図」を評価可能性に反映する経路として設計に入れる（決定論で書ける矛盾はポリシーで、危険性は危険性軸で扱う、という境界は保つ）。
 
 ### DEFER 後の扱い（#89 に先送り）
 
-決定層（入口）は「DEFER するか」を判定するだけで、「その曖昧さ・矛盾が何で、どう解決できるか」は
+決定層（入口）は「DEFER するか」を判定するだけで、「その曖昧さが何で、どう解決できるか」は
 DEFER 後の解決機構（#89）に先送りする。これは AARM が入口をクリーンに保つ境界切り分けに沿う
-（`docs/aarm/deferral.md` 参照）。confidence が曖昧さ・矛盾を正しく低く算出できるかという較正は #77。
+（`docs/aarm/deferral.md` 参照）。confidence が曖昧さを正しく低く算出できるかという較正は #77。
 
 ---
 
@@ -169,13 +177,17 @@ laarma もこれに倣い、confidence を **評価可能性（evaluability）**
 
 この線引きにより「都合の悪いものを全部 confidence に丸める」ことを防ぐ。危険性は confidence に逃がさず、ポリシー条件で表現する。
 
+なお「特定不能な矛盾」を LLM に判定させて confidence に反映することは**しない**（§4 (2b)）。当たり判定のできない
+LLM 出力を混ぜると confidence が検証不能な値で濁り、evaluability という定義の明快さを損なうためである。LLM が
+担うのは、次項の「決定論で列挙しきれないが意味論的に特定できる矛盾・曖昧さ」に限る。
+
 ### confidence 計算への LLM 活用（多層防御、最初から設計に入れる）
 
 DEFER トリガー (c) の confidence スコアは、論文では計算方法が未定義（実装依存）。ここに laarma は
 **多層防御としての LLM を最初から設計に入れる**:
 
 - 引数不足のような**決定論で判定できるもの**は、決定論（ポリシー match / パラメータ検証）で扱う。不確実な LLM に頼らない。
-- `copy(src, src)` のような**意味論的に矛盾しているが、全パターンを決定論で列挙しきれないもの**は、多層防御として LLM で検出し、confidence を下げる（→ 閾値を下回れば DEFER）。LLM は **decision を出さない**——confidence（評価可能性）という δ の一信号の計算に使われるだけで、decision を出すのはポリシー（confidence 閾値ルール）。
+- `copy(src, src)` のような**意味論的に矛盾しているが、全パターンを決定論で列挙しきれないもの**、および**曖昧な意図**（§4 (2a)）は、多層防御として LLM で検出し、confidence を下げる（→ 閾値を下回れば DEFER）。LLM は **decision を出さない**——confidence（評価可能性）という δ の一信号の計算に使われるだけで、decision を出すのはポリシー（confidence 閾値ルール）。
 
 これは AARM 仕様に反しない: semantic distance は式4 で定義されているが、confidence の計算方法は論文が未定義（実装依存）であり、そこに LLM を入れるのは仕様が空けている領域を埋めること。
 
@@ -187,7 +199,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 （receipt）に記録**すれば、切り分けと検証は担保できる（検証都合で fail-open を残す必要はない）。
 
 なお LLM は最後の網であって唯一の防御ではない。決定論で書ける危険性・矛盾はポリシーで書き、LLM は
-「決定論で列挙しきれない意味論的な曖昧・矛盾」だけを担う。この境界を守らないと、決定論で書けるものまで
+「決定論で列挙しきれない意味論的な曖昧・矛盾（ただし特定できるもの）」だけを担う。この境界を守らないと、決定論で書けるものまで
 不確実な LLM に頼る誘惑が生じる。
 
 ---
@@ -234,15 +246,15 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 本メモの設計は試作段階の想定であり、実装で確認が取れているのは一部。概略:
 
 - **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。現行の提案/上書きモデル（除去対象として現存）。
-- **設計のみ・未実装**: 決定層のポリシー評価エンジン化、LLM decision 判定の除去、MODIFY 収束ループの廃止（1パス化）、条件1〜15 の移行対応、DEFER トリガーの FRAMEWORK/CONFORMANCE 統合、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。
-- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さ・矛盾を低く算出するか。
+- **設計のみ・未実装**: 決定層のポリシー評価エンジン化、LLM decision 判定の除去、MODIFY 収束ループの廃止（1パス化）、条件1〜15 の移行対応、DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕のみ設計選択で拾う）、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。
+- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さを低く算出するか。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。
 
 ---
 
 ## 関連
 
-- 論文解釈の土台: [docs/aarm/classification-and-policy-model.md](../aarm/classification-and-policy-model.md)（Table I・Policy Structure・測定と評価の二段）、[docs/aarm/deferral.md](../aarm/deferral.md)（DEFER トリガーの FRAMEWORK/CONFORMANCE 不整合・confidence 解釈）
+- 論文解釈の土台: [docs/aarm/classification-and-policy-model.md](../aarm/classification-and-policy-model.md)（Table I・Policy Structure・測定と評価の二段）、[docs/aarm/deferral.md](../aarm/deferral.md)（DEFER の informative/normative 二層・既知/未知の未知・confidence 解釈）
 - AARM 論文 arXiv:2602.09433: 式2（Context Accumulation）、式3（Policy Structure）、式4（semantic distance）、R3・R7、§IV-B-4（FRAMEWORK 章 DEFER）、§IV-C、Contribution 2
 - 現行の提案/上書きモデル（本設計で見直す対象）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)

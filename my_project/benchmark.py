@@ -296,8 +296,8 @@ def main() -> int:
                 print(f"  actual_modified_params:   {modified_params}")
             if args.verbose and context:
                 sig = context.get("derived_signals", {})
-                sd = sig.get("semantic_distance", {})
-                print(f"  semantic_distance: avg={sd.get('average', '—')} current={sd.get('current', '—')}")
+                obs = context.get("drift_observation", {})
+                print(f"  semantic_distance: avg={obs.get('average', '—')} current={sig.get('semantic_distance', '—')}")
                 print(f"  confidence:        {sig.get('confidence_level', '—')}")
                 dc = sig.get("data_classification", [])
                 if dc:

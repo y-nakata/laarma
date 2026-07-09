@@ -88,7 +88,7 @@ laarma/
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
 | R5 改ざん耐性レシート | MUST | ✅ | `AARM_RECEIPT_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
 | R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext` が Human/Agent/Service 各主体の Ed25519 鍵で署名（個別署名 + Service の包括署名）。非対称署名・主体分離は実装済みだが、freshness/revocation 検証と identity 欠如時の deny/flag は未実装。設計は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
-| R7 意図ドリフト追跡 | SHOULD | 🔶 | `semantic_distance` に `recent_avg`・`drift_trend`・`scope_expansion_recent` を追加 |
+| R7 意図ドリフト追跡 | SHOULD | 🔶 | 距離履歴からの意図ドリフト観測（`drift_observation`: `average`・`max`・`recent_avg`・`drift_trend`）と δ の `scope_expansion_recent` で追跡する。δ（`derived_signals`）には Cn に蓄積されるステップ毎の signal 値のみを置き、集計・トレンド系の観測量（履歴として溜める意味のない毎回導出値・距離一次履歴）は `drift_observation` に分離している |
 | R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
 | R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価。詳細は [docs/PRIVILEGE.md](docs/PRIVILEGE.md) |
 

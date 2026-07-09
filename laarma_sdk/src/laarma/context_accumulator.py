@@ -101,7 +101,7 @@ class ContextAccumulator:
     ) -> None:
         self._context = SessionContext(user_intent=user_intent, metadata=metadata or {})
         self._receipts: list[dict]  = []
-        self._data_classifications: list[str]   = []
+        self._data_classification: list[str]   = []
         self._semantic_distances:   list[float] = []
         self._scope_expansions:     list[bool]  = []
         self._entity_set:           set[str]    = set()
@@ -117,11 +117,11 @@ class ContextAccumulator:
     def record_action(self, action: Action) -> None:
         self._context.append_action(action)
 
-        classifications = _classify_data(
+        classification = _classify_data(
             action.tool_name, action.parameters,
             self._pii_keywords, self._confidential_keywords, self._sensitive_tools,
         )
-        self._data_classifications.extend(classifications)
+        self._data_classification.extend(classification)
 
         dist = self._distance_calculator.compute(
             self._context.user_intent, action.tool_name, action.parameters)
@@ -183,7 +183,7 @@ class ContextAccumulator:
         current_confidence = c[-1] if c else 1.0
         m = self._action_matches_intent
         return {
-            "data_classification":      sorted(set(self._data_classifications)),
+            "data_classification":      sorted(set(self._data_classification)),
             "semantic_distance":        d[-1] if d else 0.0,
             "scope_expansion_detected": any(self._scope_expansions),
             "scope_expansion_recent":   any(self._scope_expansions[-self._DRIFT_WINDOW:]),

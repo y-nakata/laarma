@@ -169,29 +169,50 @@ class ContextAccumulator:
     _DRIFT_WINDOW = 5
 
     def derived_signals(self) -> dict:
+        """
+        δn — Cn = Cn-1 ∪ {an, on, δn} として履歴に蓄積される、そのステップの signal 値。
+
+        各キーは「このアクション時点の signal 値」であり、Cn に積まれて履歴になることに
+        意味がある（式2）。semantic_distance は式4 の埋め込みコサイン単一スカラー
+        （そのステップの距離）。集計・トレンド系（平均・最大・ドリフト傾向・距離履歴列）は
+        δn に含めない——それらは δn 各ステップ値ではなく、蓄積済みの距離一次列に対する
+        導出観測であり、履歴として溜める意味がないため drift_observation() に分離する。
+        """
         d = self._semantic_distances
         c = self._confidence_history
         current_confidence = c[-1] if c else 1.0
         m = self._action_matches_intent
-        window = d[-self._DRIFT_WINDOW:]
-        recent_avg  = round(sum(window) / len(window), 3) if window else 0.0
-        avg         = sum(d) / len(d) if d else 0.0
-        drift_trend = round(d[-1] - avg, 3) if d else 0.0
         return {
             "data_classification":      sorted(set(self._data_classifications)),
-            "semantic_distance":        {
-                "current":    d[-1] if d else 0.0,
-                "average":    round(avg, 3) if d else 0.0,
-                "max":        round(max(d), 3) if d else 0.0,
-                "history":    d,
-                "recent_avg": recent_avg,   # 直近 DRIFT_WINDOW アクションの平均
-                "drift_trend": drift_trend, # current - average（正=平均より遠ざかっている）
-            },
+            "semantic_distance":        d[-1] if d else 0.0,
             "scope_expansion_detected": any(self._scope_expansions),
             "scope_expansion_recent":   any(self._scope_expansions[-self._DRIFT_WINDOW:]),
             "action_matches_intent":     m[-1] if m else False,
             "entity_set":               sorted(self._entity_set),
             "confidence_level":         current_confidence,
+        }
+
+    def drift_observation(self) -> dict:
+        """
+        意図ドリフト追跡（R7・SHOULD）のための観測量。δn とは別枠。
+
+        distance 一次列（self._semantic_distances）に対する集計・トレンドを毎回その場で
+        導出する。トレンド値そのものの履歴は持たない（過去の drift_trend を溜めて二階の
+        変化を見る設計ではない）。history は距離の一次履歴列で、監査・フォレンジックの
+        一次資料として保持する（#81）。これらは Cn に蓄積される signal ではないため
+        derived_signals()（δn）から分離してここに置く。
+        """
+        d = self._semantic_distances
+        window = d[-self._DRIFT_WINDOW:]
+        recent_avg  = round(sum(window) / len(window), 3) if window else 0.0
+        avg         = sum(d) / len(d) if d else 0.0
+        drift_trend = round(d[-1] - avg, 3) if d else 0.0
+        return {
+            "average":     round(avg, 3) if d else 0.0,
+            "max":         round(max(d), 3) if d else 0.0,
+            "history":     d,
+            "recent_avg":  recent_avg,   # 直近 DRIFT_WINDOW アクションの平均
+            "drift_trend": drift_trend,  # current - average（正=平均より遠ざかっている）
         }
 
     def summary(self) -> dict:
@@ -202,4 +223,5 @@ class ContextAccumulator:
             "recent_actions":  self.recent_actions(n=5),
             "receipt_count":   len(self._receipts),
             "derived_signals": self.derived_signals(),
+            "drift_observation": self.drift_observation(),
         }

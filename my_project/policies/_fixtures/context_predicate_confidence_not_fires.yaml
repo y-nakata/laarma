@@ -1,0 +1,19 @@
+# テスト専用フィクスチャ: context.confidence_level 述語の不発火確認（#112 Phase B0）。
+#
+# _fixtures/context_predicate.yaml の _test_context_confidence_fires と対になる。
+# 同一 tool（list_files）・同一アクション（intent="何か手伝えることある？"、
+# directory="."）に対して閾値だけを変える。confidence_level 実測値（約 0.71）を含まない
+# 閾値（lte: 0.55）にすることで、発火側（lte: 0.85）との差が数値比較の結果からのみ生まれる
+# ことを確認する。この2ファイルを意図的に分離しているのは、両ルールを同一ファイルに co-resident
+# させると、発火側ルールが常に先に評価対象になり不発火側の単独動作を検証できなくなるため。
+
+rules:
+  - id: _test_context_confidence_not_fires
+    decision: DENY
+    reason: "テスト専用: context.confidence_level lte 0.55 の不発火確認（実測値 約0.71 を含まない閾値）。"
+    priority: 5
+    conditions:
+      tool: list_files
+      context:
+        confidence_level:
+          lte: 0.55

@@ -20,24 +20,18 @@ rules:
         data_classification:
           contains: PII
 
-  # 数値演算子 gte（confidence_level 向け）。confidence_level は常に [0.0, 1.0] に収まるため、
-  # gte: 0.0 は入力によらず必ず真、gte: 2.0 は入力によらず必ず偽になる。
-  - id: _test_context_confidence_always_true
+  # 数値演算子 lte（confidence_level 向け）。テスト用アクション（list_files, intent="何か手伝えることある？"）
+  # の confidence_level 実測値は概ね 0.71（benchmark --verbose で確認）。0.0/1.0 の端に張り付かない
+  # 中間値のため、その両側に十分なマージン（約 0.14〜0.16）を取った閾値で発火/不発火の差が数値比較の
+  # 結果からのみ生まれるようにする。not-fires 側の対となるルールは
+  # `_fixtures/context_predicate_confidence_not_fires.yaml` に分離する（同一 tool・同一アクションに
+  # 対して閾値だけを変え、tool を変えて誤魔化さない）。
+  - id: _test_context_confidence_fires
     decision: DENY
-    reason: "テスト専用: context.confidence_level gte 0.0 の発火確認（常に真）。"
+    reason: "テスト専用: context.confidence_level lte 0.85 の発火確認（実測値 約0.71 を含む閾値）。"
     priority: 5
     conditions:
       tool: list_files
       context:
         confidence_level:
-          gte: 0.0
-
-  - id: _test_context_confidence_never_true
-    decision: DENY
-    reason: "テスト専用: context.confidence_level gte 2.0 の不発火確認（常に偽）。"
-    priority: 5
-    conditions:
-      tool: list_directory
-      context:
-        confidence_level:
-          gte: 2.0
+          lte: 0.85

@@ -17,30 +17,71 @@ PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す単�
   - denied_tools / privilege_scope は `rules` の priority システムの外側にある独立した
     事前チェックとして扱う（R3/Table I の Forbidden 分類——コンテキスト評価が完全に無視される
     唯一の分類——に対応）。
+  - ルール条件は `context.<signal>` で `derived_signals()`（δ）を参照できる。値は述語オブジェクト
+    `{演算子: 値}` で指定し、数値シグナル（semantic_distance / confidence_level）は
+    gt/gte/lt/lte/eq、集合シグナル（data_classification）は contains を使う。
+    R3(a)（未 populate な context 参照 → DEFER）は実装しない。laarma の同期モデルでは δ は
+    評価前に必ず算出され「未 populate」が生じないため（derived_signals() は常にデフォルト値で
+    埋まる）。
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 from .environment import EnvironmentContext
 from .models import Action, AuthorizationResult, Decision, SessionContext
+
+
+_NUMERIC_PREDICATE_OPS: dict[str, Callable[[float, float], bool]] = {
+    "gt":  lambda value, operand: value > operand,
+    "gte": lambda value, operand: value >= operand,
+    "lt":  lambda value, operand: value < operand,
+    "lte": lambda value, operand: value <= operand,
+    "eq":  lambda value, operand: value == operand,
+}
+
+
+def _match_context_predicate(value: Any, predicate: dict) -> bool:
+    """derived_signals() の1シグナル値が述語オブジェクトに一致するか判定する。
+
+    複数演算子キーを持つ predicate は AND 評価（例: {"gt": 0.3, "lt": 0.9} で範囲指定）。
+    未参照・デフォルト値の区別は行わない（R3(a) 非実装。#112 Phase B0）ため、value が
+    None または空集合の場合は「安全側 = 不一致」として false を返す。
+    """
+    for op, operand in predicate.items():
+        if op == "contains":
+            if operand not in (value or []):
+                return False
+        elif op in _NUMERIC_PREDICATE_OPS:
+            if value is None or not _NUMERIC_PREDICATE_OPS[op](value, operand):
+                return False
+        else:
+            raise ValueError(f"未知の context 述語演算子です: {op!r}")
+    return True
 
 
 def _match_conditions(
     conditions: dict,
     action: Action,
     environment: EnvironmentContext | None,
+    derived_signals: dict | None = None,
 ) -> bool:
     """全条件が一致した場合に True を返す。any_of（OR）/ none_of（NOT）をサポート。"""
     if "any_of" in conditions:
-        if not any(_match_conditions(c, action, environment) for c in conditions["any_of"]):
+        if not any(
+            _match_conditions(c, action, environment, derived_signals)
+            for c in conditions["any_of"]
+        ):
             return False
 
     if "none_of" in conditions:
-        if any(_match_conditions(c, action, environment) for c in conditions["none_of"]):
+        if any(
+            _match_conditions(c, action, environment, derived_signals)
+            for c in conditions["none_of"]
+        ):
             return False
 
     if "tool" in conditions and action.tool_name != conditions["tool"]:
@@ -57,6 +98,11 @@ def _match_conditions(
     for param, pattern in conditions.get("param_matches", {}).items():
         value = str(action.parameters.get(param, ""))
         if not re.search(pattern, value):
+            return False
+
+    signals = derived_signals or {}
+    for signal, predicate in conditions.get("context", {}).items():
+        if not _match_context_predicate(signals.get(signal), predicate):
             return False
 
     return True
@@ -165,8 +211,9 @@ class PolicyEngine:
         #    （または MODIFY が複数マッチした）場合は terminal DEFER（R3(b) 競合トリガー）。
         rule_proposal: AuthorizationResult | None = None
         current_params = dict(action.parameters)
+        derived_signals = context_summary.get("derived_signals", {})
 
-        matches = self._collect_matching_rules(action, environment)
+        matches = self._collect_matching_rules(action, environment, derived_signals)
         if matches:
             resolution = self._resolve_priority(matches)
 
@@ -281,11 +328,12 @@ class PolicyEngine:
         self,
         action: Action,
         environment: EnvironmentContext | None,
+        derived_signals: dict | None = None,
     ) -> list[StaticRule]:
         """action にマッチする全ルールを YAML 記述順で返す。"""
         return [
             rule for rule in self._policy.rules
-            if _match_conditions(rule.conditions, action, environment)
+            if _match_conditions(rule.conditions, action, environment, derived_signals)
         ]
 
     def _resolve_priority(self, matches: list[StaticRule]) -> _PriorityResolution:

@@ -58,6 +58,7 @@ def load_policy(path: str | Path) -> Policy:
             reason=r["reason"],
             conditions=r.get("conditions", {}),
             modify_transform=r.get("modify_transform"),
+            priority=r.get("priority", 0),
         )
         for r in data.get("rules", [])
     ]

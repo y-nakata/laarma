@@ -3,6 +3,31 @@
   "title": "laarma Policy",
   "description": "laarma_sdk PolicyEngine に読み込まれる静的ポリシー定義",
   "definitions": {
+    "numericPredicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "数値シグナルに対する述語。複数キーを持つ場合は AND 評価（例: gt と lt の組で範囲指定）。",
+      "properties": {
+        "gt":  { "type": "number", "description": "value > 指定値 のとき一致。" },
+        "gte": { "type": "number", "description": "value >= 指定値 のとき一致。" },
+        "lt":  { "type": "number", "description": "value < 指定値 のとき一致。" },
+        "lte": { "type": "number", "description": "value <= 指定値 のとき一致。" },
+        "eq":  { "type": "number", "description": "value == 指定値 のとき一致。" }
+      }
+    },
+    "setPredicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "集合シグナルに対する述語。",
+      "properties": {
+        "contains": {
+          "type": "string",
+          "description": "指定値が集合シグナルに含まれるとき一致。シグナルが空/未取得の場合は不一致。"
+        }
+      }
+    },
     "conditions": {
       "type": "object",
       "description": "全て AND 評価。全条件一致でルールが発火する。any_of / none_of で OR / NOT も記述可能。",
@@ -25,6 +50,16 @@
           "type": "object",
           "additionalProperties": { "type": "string" },
           "description": "パラメータ名 → 正規表現パターン のマップ。全て一致でマッチ。"
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "derived_signals()（δ）を参照する述語。数値シグナルは gt/gte/lt/lte/eq、集合シグナルは contains。",
+          "properties": {
+            "semantic_distance":   { "$ref": "#/definitions/numericPredicate" },
+            "confidence_level":    { "$ref": "#/definitions/numericPredicate" },
+            "data_classification": { "$ref": "#/definitions/setPredicate" }
+          }
         },
         "any_of": {
           "type": "array",
@@ -62,7 +97,7 @@
     },
     "rules": {
       "type": "array",
-      "description": "追加の静的ルール。PolicyEngine が順番に評価し、最初にマッチしたものを適用する。",
+      "description": "追加の静的ルール。PolicyEngine は全マッチするルールを収集し、最も高い priority のルールを適用する（同一 priority で decision が競合する場合は DEFER）。",
       "items": {
         "type": "object",
         "required": ["id", "decision", "reason"],
@@ -74,7 +109,7 @@
           },
           "decision": {
             "type": "string",
-            "enum": ["DENY", "DEFER", "MODIFY"],
+            "enum": ["ALLOW", "DENY", "DEFER", "MODIFY", "STEP_UP"],
             "description": "条件一致時に返す決定。"
           },
           "reason": {
@@ -89,6 +124,10 @@
               "enum": ["basename", "to_relative"]
             },
             "description": "MODIFY 時のパラメータ変換。パラメータ名 → 変換名 (_TRANSFORM_REGISTRY のキー)。"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "値が大きいほど優先。省略時は 0。同一 priority で複数ルールがマッチし decision が競合する場合は DEFER になる。"
           }
         }
       }

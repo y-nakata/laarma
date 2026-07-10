@@ -82,12 +82,12 @@ def run_scenario(
 
     ctx = runtime.context_summary
     sig = ctx.get("derived_signals", {})
-    sd  = sig.get("semantic_distance", {})
+    obs = ctx.get("drift_observation", {})
     print(f"\n  《《《 AARM サマリ 》》》")
     print(f"  総アクション数    : {ctx['action_count']}")
     print(f"  確信度          : {sig.get('confidence_level', '-')}")
-    print(f"  データ分類        : {sig.get('data_classifications', [])}")
-    print(f"  セマンティック距離: avg={sd.get('average', '-')} max={sd.get('max', '-')}")
+    print(f"  データ分類        : {sig.get('data_classification', [])}")
+    print(f"  セマンティック距離: avg={obs.get('average', '-')} max={obs.get('max', '-')}")
     print(f"  レシート:")
     for r in runtime.receipts:
         resolution = ""

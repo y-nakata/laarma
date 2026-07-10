@@ -27,7 +27,7 @@ privilege_scope は「この主体はこのツールを呼んでよい」とい�
 
 ## 評価の位置づけ
 
-privilege_scope のチェックは **PolicyEngine（静的ゲート）** で行われる。denied_tools（絶対禁止）と並ぶ、コンテキストを見ずに即座に判定できる静的ルールである。「そのツールを呼ぶ権限がそもそもない」は意図整合性以前の問題なので、LLM 評価（IntentAlignment）に渡る前に弾かれる。
+privilege_scope のチェックは **PolicyEngine（静的ゲート）** で行われる。denied_tools（絶対禁止）と並ぶ、コンテキストを見ずに即座に判定できる静的ルールであり、`rules` の priority 解決システムより手前で評価される。
 
 ```
 アクション要求
@@ -36,8 +36,8 @@ privilege_scope のチェックは **PolicyEngine（静的ゲート）** で行�
   ├─ identity/privilege_scope が未設定？ → DENY  ← fail-closed
   ├─ denied_tools にある？          → DENY
   ├─ privilege_scope にない？         → DENY  ← ここ
-  ├─ その他の静的ルールにマッチ？     → DENY / DEFER / MODIFY
-  └─ どれにも該当しない              → None（IntentAlignment へ委譲）
+  ├─ rules（priority 解決）にマッチ？ → ALLOW / DENY / DEFER / MODIFY / STEP_UP
+  └─ どれにも該当しない              → baseline ALLOW
 ```
 
 ## 仕様との関係と現状の限界

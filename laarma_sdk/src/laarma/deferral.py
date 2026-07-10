@@ -9,7 +9,7 @@ SDK 方式では「エージェントの推論トレース・メモリ・保留�
 追加データを収集して最終判断を下せる」と仕様に明記されている。
 
 処理フロー:
-  1. IntentAlignment が DEFER を返す
+  1. PolicyEngine が DEFER を返す
   2. DeferralResolver が自律的に追加コンテキストを収集させて再評価を試みる
   3. 自律解決できた場合: ALLOW または DENY を返す
   4. 自律解決できない場合: STEP_UP に格上げして人間介入を要求
@@ -23,7 +23,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from .intent_alignment import (
+from ._text_sanitize import (
     _MAX_INTENT_LEN,
     _MAX_REASON_LEN,
     _sanitize_params,
@@ -33,8 +33,8 @@ from .intent_alignment import (
 from .models import Action, AuthorizationResult, Decision
 
 
-# このプロンプトを IntentAlignment と分けるのは、「追加コンテキスト付きで再評価する」
-# という DeferralResolver 固有の責務を明示するため
+# このプロンプトを PolicyEngine の評価ロジックと分けるのは、「追加コンテキスト付きで
+# 再評価する」という DeferralResolver 固有の責務を明示するため
 SYSTEM_PROMPT = """\
 You are an AARM deferral resolver.
 A previous evaluation returned DEFER because context was insufficient or ambiguous.
@@ -44,7 +44,11 @@ You receive:
 - original_deferral_reason: why the first evaluation was deferred
 - user_intent: the user's original request
 - recent_actions: prior actions in this session
-- derived_signals: data_classifications, semantic_distance, scope_expansion_detected
+- derived_signals: per-step signal values (δ) — data_classification, semantic_distance
+  (this step's embedding-cosine scalar), scope_expansion_detected
+- drift_observation: intent-drift tracking derived from the distance history —
+  average, max, recent_avg, drift_trend (current - average), and history (the raw
+  distance series)
 - proposed_action: the action pending execution
 - additional_context: supplementary information gathered after deferral
 
@@ -126,6 +130,7 @@ class DeferralResolver:
                     "user_intent":              _truncate(context_summary.get("user_intent", ""), _MAX_INTENT_LEN),
                     "recent_actions":           _sanitize_recent_actions(context_summary.get("recent_actions", [])),
                     "derived_signals":          context_summary.get("derived_signals", {}),
+                    "drift_observation":        context_summary.get("drift_observation", {}),
                     "proposed_action": {
                         "tool_name":  action.tool_name,
                         "parameters": _sanitize_params(action.parameters),
@@ -180,6 +185,7 @@ class DeferralResolver:
             # 「DEFER を STEP_UP に解決した」というその時点の解決手段を正しく記録しており、矛盾はない。
             resolution_method="autonomous" if decision != Decision.STEP_UP else "step_up",
             resolution_timestamp=now,
+            decision_source="deferral_resolver",
         )
         return result
 

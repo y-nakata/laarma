@@ -33,7 +33,7 @@ def _fields_from_entry(entry: dict) -> dict:
         "decision":            entry["decision"],
         "reason":              entry["reason"],
         "modified_params":     entry.get("modified_params"),
-        "decision_source":     entry.get("decision_source", "intent_alignment"),
+        "decision_source":     entry.get("decision_source"),
         "policy_rule_id":      entry.get("policy_rule_id"),
         "deferral_reason":     entry.get("deferral_reason"),
         "proposed_decision":   entry.get("proposed_decision"),

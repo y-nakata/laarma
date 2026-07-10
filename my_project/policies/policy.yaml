@@ -7,8 +7,8 @@
 #   denied_tools    : 絶対禁止ツール。呼び出されると即 DENY。
 #   required_params : ツールごとの必須パラメータ。不足時は DEFER。
 #   max_actions     : セッション内の最大アクション数。超過時は DENY。
-#   rules           : 追加の静的ルール（順番に評価、最初にマッチしたものを適用）。
-#   evaluation      : IntentAlignment へ渡す評価パラメータ。
+#   rules           : 追加の静的ルール（全マッチを収集し、最も高い priority のルールを適用。
+#                     同一 priority で decision が競合する場合は DEFER）。
 
 denied_tools:
   - drop_database
@@ -29,10 +29,9 @@ required_params:
 
 max_actions: 50
 
-# 静的ルール（PolicyEngine が順番に評価）
+# 静的ルール（PolicyEngine が全マッチを収集し priority で解決する）
 # 【注記】これらは AARM 仕様外のドメイン固有ルール（試作上の妥協）。
-# path パターンマッチングなどの決定論的変換を PolicyEngine に委ねることで
-# IntentAlignment を純粋な AARM 意図整合性評価に特化させている。
+# path パターンマッチングなどの決定論的変換を PolicyEngine に委ねている。
 rules:
   - id: unsafe_write_path
     decision: MODIFY

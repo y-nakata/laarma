@@ -188,13 +188,13 @@ class AuthorizationResult:
     timestamp:             datetime        = field(default_factory=lambda: datetime.now(timezone.utc))
     # ポリシー参照 — 仕様 R5: "receipt must include the policy context used in evaluation"
     policy_rule_id:        str | None      = None   # 発火した StaticRule.id (PolicyEngine のみ)
-    decision_source:       str             = "intent_alignment"  # "policy_engine" | "denied_tools" | "privilege_scope" | "intent_alignment"
+    decision_source:       str             = "policy_engine"  # "policy_engine" | "denied_tools" | "privilege_scope" | "required_params" | "baseline_allow" | "deferral_resolver" | "step_up_resolver"
     # DEFER ワークフロー用フィールド
     deferral_reason:       str | None      = None
     resolution_method:     str | None      = None  # "autonomous" | "step_up" | "human_approved" | "human_denied" | None
     resolution_timestamp:  datetime | None = None
-    # 提案/上書きモデル用フィールド — PolicyEngine の提案が IntentAlignment に上書きされた際に記録
-    proposed_decision:     str | None      = None  # PolicyEngine が提案した decision 値
+    # 同一 priority 競合(R3(b))の DEFER でのみ設定 — 競合した decision 値の集合（comma-joined）
+    proposed_decision:     str | None      = None
     _receipt_hash:         str | None      = field(default=None, init=False, repr=False)
     _sealed:                bool           = field(default=False, init=False, repr=False)
 

@@ -119,6 +119,32 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 
 移行先はおおむね三つに分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,5,6,7,8,10,13,14,15。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9,11）。廃止は条件 12。
 
+### δ 参照の記法: `context.<signal>` 述語オブジェクト
+
+ルール条件は `context` 区画で `derived_signals()`（δ）を参照する。記法は述語オブジェクト
+`context.<signal>: {演算子: 値}` であり、`<signal>_gt` のようなキー名にサフィックスを付与する
+方式は採らない。1つの述語オブジェクトに複数の演算子キーを書いた場合は AND 評価する（例:
+`{gt: 0.3, lt: 0.9}` で範囲指定）。
+
+参照可能なシグナルと演算子は以下に固定する（`derived_signals()` が返す値のうち、集計・トレンド系
+は `drift_observation()` に分離済みで対象外——現在値のみを参照する）。
+
+| `context.<signal>` | `derived_signals()` のキー | 型 | 演算子 |
+|---|---|---|---|
+| `context.semantic_distance` | `semantic_distance` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
+| `context.confidence_level` | `confidence_level` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
+| `context.data_classification` | `data_classification` | 集合（sorted set） | `contains` |
+
+`scope_expansion` の参照は、scope_expansion の intent 側 LLM 判定（#99）が完了してから追加する。
+
+未参照の context を DEFER トリガーにする R3(a)（CONFORMANCE 章、次節参照）は実装しない。laarma は
+δ を評価前に必ず算出してから policy 評価に渡す同期モデルであり、`derived_signals()` は履歴が無い
+シグナルも常にデフォルト値（`semantic_distance=0.0` / `confidence_level=1.0` /
+`data_classification=[]` 等）で埋めて返す。したがって「未 populate な context 参照」という状態が
+実行時に生じない。ルール側の `context.<signal>` 述語も、値が `None` または空集合のときは
+安全側（不一致）に倒して false を返すため、R3(a) 用に accumulator へ未 populate 検出を追加する
+必要はない。
+
 ---
 
 ## 4. DEFER のトリガー: 適合性は R3、FRAMEWORK 章を拾うかは laarma の設計選択
@@ -148,6 +174,10 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 - **(4) 安全性がセッション未取得情報に依存** → 参照先がポリシーに書けている既知の未知なら R3(a)（未 populate の context 参照）で捉わる。未知の未知（参照先を書けない）は DEFER の対象でなく DENY（`docs/aarm/deferral.md` §1）。なお laarma の同期モデルでは δ は評価前に必ず算出され「未 populate」が生じないため、R3(a) は現状非発生（並行/非同期実行を採れば発生しうる）。
 
 **まとめ**: 適合性は R3(a)(b)(c) で足りる。laarma が FRAMEWORK 章を超えて拾う設計選択のうち、実装できるのは (1) の組み合わせと (2a) 曖昧な意図（§5 の confidence-LLM 経由）に絞られる。(2b) の特定不能な矛盾と (3) 複合リスクは、拾おうとしても実装可能性・検証可能性・DEFER/DENY の区別の壁に当たり、DEFER として拾わない（該当する筋は決定論ポリシー・DENY・#100 に振り分ける）。したがって §5 の confidence 計算への LLM 活用は、「曖昧な意図」を評価可能性に反映する経路として設計に入れる（決定論で書ける矛盾はポリシーで、危険性は危険性軸で扱う、という境界は保つ）。
+
+上記 (4) は論文解釈としては R3(a) に対応するが、laarma では R3(a) 自体を実装しない（§3「δ 参照の記法」
+参照）。laarma の同期モデルでは δ が評価前に必ず算出され「未 populate な context 参照」という状態が
+実行時に生じないため、決定論的な (4) の捕捉は R3(a) という機構を介さず構造的に成立する。
 
 ### DEFER 後の扱い（#89 に先送り）
 
@@ -234,7 +264,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - **除去**: `intent_alignment.py` の decision 判定 LLM、`policy_engine.py` の `_confirm_with_ia` 提案/上書き構造、および静的ルール収束ループ（`max_modify_iterations`。§2「MODIFY は1パス変換で terminal」参照）。
 - **活かす**: `distance_calculator.py`、Context Accumulator の δ 産出。
 - **拡張**: `_match_conditions`（δ 参照。本リファクタ内で需要駆動に段階実装、旧 #107 吸収）、ポリシー評価を priority 解決の (a,C) 評価エンジンに（MODIFY は1パス変換で terminal、同一 priority 複数 MODIFY は DEFER）。confidence 計算への LLM 活用（§5）。
-- **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計で大きく変わるため、実装時に見直す。
+- **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計により置き換え済みのためアーカイブ化した。
 - **温存（本設計では触らない）**: `max_actions`（回数上限による運用バックストップ。ゴールに近づかないまま動作を継続する状態＝intent drift 的な暴走を、drift 検出機構が無い現状で回数によって粗く肩代わりして止める。AARM の (a, C) 意図評価とは無関係の運用ガードであり、本物の drift 検出〔δ の distance drift / scope_expansion、#99〕が入れば役割はそちらへ移る。現状 benchmark ではどのケースも閾値〔既定 50〕に届かず休眠）。
 
 実装時の規律（#94 で確立）: 統合すべきもの（confidence の入口写像・DEFER トリガー・δ のポリシー参照）を切り離さない / 条件1〜15 の移行を benchmark で検証しながら実装する / 危険性を confidence に混ぜない。
@@ -245,10 +275,9 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 本メモの設計は試作段階の想定であり、実装で確認が取れているのは一部。概略:
 
-- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。現行の提案/上書きモデル（除去対象として現存）。
-- **設計のみ・未実装**: 決定層のポリシー評価エンジン化、LLM decision 判定の除去、MODIFY 収束ループの廃止（1パス化）、条件1〜15 の移行対応、DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕のみ設計選択で拾う）、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。
-- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さを低く算出するか。
-- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。
+- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains）— #112 Phase B0 で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
+- **設計のみ・未実装**: δ を参照する個別の match predicate ルール（semantic_distance/data_classification/confidence の閾値・集合参照。条件1〜15 の移行対応。Phase B1〜B3 で段階実装）、DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕のみ設計選択で拾う）のうち δ 依存部分、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。いずれも Phase B1 以降の対象。
+- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さ・矛盾を低く算出するか。Phase A/B0 時点ではこれらは baseline ALLOW に素通りする既知の回帰であり（`benchmark_data.jsonl` の `known_regression_until: "Phase B"`）、Phase B1〜B3 とセットで回復を確認する。- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。
 
 ---
 
@@ -256,7 +285,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 - 論文解釈の土台: [docs/aarm/classification-and-policy-model.md](../aarm/classification-and-policy-model.md)（Table I・Policy Structure・測定と評価の二段）、[docs/aarm/deferral.md](../aarm/deferral.md)（DEFER の informative/normative 二層・既知/未知の未知・confidence 解釈）
 - AARM 論文 arXiv:2602.09433: 式2（Context Accumulation）、式3（Policy Structure）、式4（semantic distance）、R3・R7、§IV-B-4（FRAMEWORK 章 DEFER）、§IV-C、Contribution 2
-- 現行の提案/上書きモデル（本設計で見直す対象）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
+- 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
 - 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（本リファクタが触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
 - 関連 Issue: #112（本設計の実装。#94 後継）、#94（signal/decision 分離。#112 に立て直し・not_planned クローズ）、#107（δ 参照拡張。#112 に吸収・not_planned クローズ）、#99（scope_expansion）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

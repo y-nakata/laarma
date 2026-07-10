@@ -8,7 +8,6 @@ from .context_accumulator import ContextAccumulator
 from .deferral import DeferralResolver
 from .step_up_resolver import StepUpResolver
 from .environment import EnvironmentContext, MaintenanceWindow
-from .intent_alignment import IntentAlignment
 from .models import Action, AuthorizationResult, Decision, IdentityContext, SessionContext
 from .policy_engine import DEFAULT_POLICY, Policy, PolicyEngine, StaticRule
 from .policy_loader import load_policy
@@ -27,7 +26,6 @@ __all__ = [
     "StepUpResolver",
     "EnvironmentContext",
     "IdentityContext",
-    "IntentAlignment",
     "load_policy",
     "MaintenanceWindow",
     "Policy",

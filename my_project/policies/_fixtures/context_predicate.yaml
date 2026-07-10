@@ -1,0 +1,43 @@
+# テスト専用フィクスチャ: context.<signal> 述語評価（δ 参照の共通機構、#112 Phase B0）の
+# 疎通確認用。
+#
+# benchmark_data.jsonl の context_predicate_* のみが policy_file 経由でこのファイルをロードする。
+# 配布用 my_project/policies/policy.yaml にはテスト専用ルールを混在させない。
+#
+# 各シグナルについて「発火するケース」と「発火しないケース」を対で用意し、述語評価器が
+# 実際に動作していることを decision の差で確認できるようにする。
+
+rules:
+  # 集合演算子 contains（data_classification 向け）。値は read_file の path パラメータに
+  # PII キーワードが含まれるかどうかで決定論的に決まる（embedding モデル不要）。
+  - id: _test_context_data_classification_pii
+    decision: DENY
+    reason: "テスト専用: context.data_classification contains PII の発火確認。"
+    priority: 5
+    conditions:
+      tool: read_file
+      context:
+        data_classification:
+          contains: PII
+
+  # 数値演算子 gte（confidence_level 向け）。confidence_level は常に [0.0, 1.0] に収まるため、
+  # gte: 0.0 は入力によらず必ず真、gte: 2.0 は入力によらず必ず偽になる。
+  - id: _test_context_confidence_always_true
+    decision: DENY
+    reason: "テスト専用: context.confidence_level gte 0.0 の発火確認（常に真）。"
+    priority: 5
+    conditions:
+      tool: list_files
+      context:
+        confidence_level:
+          gte: 0.0
+
+  - id: _test_context_confidence_never_true
+    decision: DENY
+    reason: "テスト専用: context.confidence_level gte 2.0 の不発火確認（常に偽）。"
+    priority: 5
+    conditions:
+      tool: list_directory
+      context:
+        confidence_level:
+          gte: 2.0

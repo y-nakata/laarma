@@ -3,6 +3,31 @@
   "title": "laarma Policy",
   "description": "laarma_sdk PolicyEngine に読み込まれる静的ポリシー定義",
   "definitions": {
+    "numericPredicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "数値シグナルに対する述語。複数キーを持つ場合は AND 評価（例: gt と lt の組で範囲指定）。",
+      "properties": {
+        "gt":  { "type": "number", "description": "value > 指定値 のとき一致。" },
+        "gte": { "type": "number", "description": "value >= 指定値 のとき一致。" },
+        "lt":  { "type": "number", "description": "value < 指定値 のとき一致。" },
+        "lte": { "type": "number", "description": "value <= 指定値 のとき一致。" },
+        "eq":  { "type": "number", "description": "value == 指定値 のとき一致。" }
+      }
+    },
+    "setPredicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "集合シグナルに対する述語。",
+      "properties": {
+        "contains": {
+          "type": "string",
+          "description": "指定値が集合シグナルに含まれるとき一致。シグナルが空/未取得の場合は不一致。"
+        }
+      }
+    },
     "conditions": {
       "type": "object",
       "description": "全て AND 評価。全条件一致でルールが発火する。any_of / none_of で OR / NOT も記述可能。",
@@ -25,6 +50,16 @@
           "type": "object",
           "additionalProperties": { "type": "string" },
           "description": "パラメータ名 → 正規表現パターン のマップ。全て一致でマッチ。"
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "derived_signals()（δ）を参照する述語。数値シグナルは gt/gte/lt/lte/eq、集合シグナルは contains。",
+          "properties": {
+            "semantic_distance":   { "$ref": "#/definitions/numericPredicate" },
+            "confidence_level":    { "$ref": "#/definitions/numericPredicate" },
+            "data_classification": { "$ref": "#/definitions/setPredicate" }
+          }
         },
         "any_of": {
           "type": "array",

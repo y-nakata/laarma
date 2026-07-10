@@ -119,6 +119,32 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 
 移行先はおおむね三つに分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,5,6,7,8,10,13,14,15。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9,11）。廃止は条件 12。
 
+### δ 参照の記法: `context.<signal>` 述語オブジェクト
+
+ルール条件は `context` 区画で `derived_signals()`（δ）を参照する。記法は述語オブジェクト
+`context.<signal>: {演算子: 値}` であり、`<signal>_gt` のようなキー名にサフィックスを付与する
+方式は採らない。1つの述語オブジェクトに複数の演算子キーを書いた場合は AND 評価する（例:
+`{gt: 0.3, lt: 0.9}` で範囲指定）。
+
+参照可能なシグナルと演算子は以下に固定する（`derived_signals()` が返す値のうち、集計・トレンド系
+は `drift_observation()` に分離済みで対象外——現在値のみを参照する）。
+
+| `context.<signal>` | `derived_signals()` のキー | 型 | 演算子 |
+|---|---|---|---|
+| `context.semantic_distance` | `semantic_distance` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
+| `context.confidence_level` | `confidence_level` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
+| `context.data_classification` | `data_classification` | 集合（sorted set） | `contains` |
+
+`scope_expansion` の参照は、scope_expansion の intent 側 LLM 判定（#99）が完了してから追加する。
+
+未参照の context を DEFER トリガーにする R3(a)（CONFORMANCE 章、次節参照）は実装しない。laarma は
+δ を評価前に必ず算出してから policy 評価に渡す同期モデルであり、`derived_signals()` は履歴が無い
+シグナルも常にデフォルト値（`semantic_distance=0.0` / `confidence_level=1.0` /
+`data_classification=[]` 等）で埋めて返す。したがって「未 populate な context 参照」という状態が
+実行時に生じない。ルール側の `context.<signal>` 述語も、値が `None` または空集合のときは
+安全側（不一致）に倒して false を返すため、R3(a) 用に accumulator へ未 populate 検出を追加する
+必要はない。
+
 ---
 
 ## 4. DEFER のトリガー: FRAMEWORK 章と CONFORMANCE 章の両方を設計に含める
@@ -140,6 +166,10 @@ DEFER の設計にあたり、当初は CONFORMANCE 章 R3 の3トリガー (a)(
 - **(4) 安全性がセッション未取得情報に依存** → R3(a)（未 populate の context 参照）で決定論的に捉わる。
 
 要点: DEFER を R3 の (a)(b)(c) だけで組むと、FRAMEWORK 章の「矛盾する文脈信号」「複合リスクの不明さ」を取りこぼす。laarma は両方を DEFER 設計に含める。特に「意味論的な矛盾・曖昧さ」の検出は §5 の多層防御として最初から設計に入れる。
+
+上記 (4) は論文解釈としては R3(a) に対応するが、laarma では R3(a) 自体を実装しない（§3「δ 参照の記法」
+参照）。laarma の同期モデルでは δ が評価前に必ず算出され「未 populate な context 参照」という状態が
+実行時に生じないため、決定論的な (4) の捕捉は R3(a) という機構を介さず構造的に成立する。
 
 ### DEFER 後の扱い（#89 に先送り）
 

@@ -23,9 +23,12 @@ python my_project/demo.py
   "action": {"tool_name": "delete_file", "parameters": {"path": "tmp.txt"}, "...": "..."},
   "modified_params": null,
   "timestamp": "2026-06-07T12:00:00+00:00",
+  "confidence_llm_penalty": 0.0,
   "resolution_method": null
 }
 ```
+
+`confidence_llm_penalty`/`confidence_llm_detail`（#112 Phase C）は confidence の LLM 検出層（`SemanticAmbiguityDetector`）による追加減点幅・検出理由です。`confidence_llm_penalty` は LLM 層が呼ばれていれば常に記録されます（`0.0` = 呼ばれたが検出なし）。`confidence_llm_detail` は検出時（または fail-closed 時）の理由のみ記録され、`penalty=0.0` のときは省略されます。両フィールドが無い受領書は confidence LLM 検出層が呼ばれていない（`confidence_llm=NullConfidenceLLM()` 等で無効化されている）ことを意味します。decision がどの機構（決定論ポリシー／confidence 経由）に由来するかは `decision_source`・`policy_rule_id` と合わせて確認できます。
 
 `resolution_method` の値:
 

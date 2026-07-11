@@ -39,11 +39,13 @@ class AARMRuntime:
         policy: Policy | None = None,
         metadata: dict[str, Any] | None = None,
         transform_registry: "dict[str, Any] | None" = None,
+        confidence_llm: Any | None = None,
     ) -> None:
         self._identity    = identity
         self._environment = environment
         _policy           = policy or DEFAULT_POLICY
-        self._accumulator = ContextAccumulator(user_intent=user_intent, metadata=metadata, policy=_policy)
+        self._accumulator = ContextAccumulator(
+            user_intent=user_intent, metadata=metadata, policy=_policy, confidence_llm=confidence_llm)
         self._policy_engine = PolicyEngine(
             policy=_policy,
             transform_registry=transform_registry,
@@ -128,6 +130,12 @@ class AARMRuntime:
 
     def _finalize(self, result: AuthorizationResult) -> AuthorizationResult:
         """receipt_hash を封緘してから記録・ログする単一経路。鍵を知るのはここだけ。"""
+        # #112 Phase C: confidence LLM 検出層の減点幅・検出理由を受領書に写す。DEFER/STEP_UP
+        # 解決後の呼び出しでも record_action() は再実行されないため、この時点の
+        # derived_signals は元アクションのものがそのまま有効。
+        derived = self._accumulator.summary().get("derived_signals", {})
+        result.confidence_llm_penalty = derived.get("confidence_llm_penalty")
+        result.confidence_llm_detail  = derived.get("confidence_llm_detail")
         result.seal(self._receipt_secret)
         self._accumulator.record_result(result)
         self._log(result)

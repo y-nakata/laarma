@@ -189,6 +189,13 @@ class AuthorizationResult:
     # ポリシー参照 — 仕様 R5: "receipt must include the policy context used in evaluation"
     policy_rule_id:        str | None      = None   # 発火した StaticRule.id (PolicyEngine のみ)
     decision_source:       str             = "policy_engine"  # "policy_engine" | "denied_tools" | "privilege_scope" | "required_params" | "baseline_allow" | "deferral_resolver" | "step_up_resolver"
+    # #112 Phase C: confidence 計算への LLM 検出層による減点幅・検出理由。decision には
+    # 関与しない（decision を出すのはポリシーの confidence 閾値ルール）が、どの decision が
+    # 決定論由来でどれが confidence 経由（LLM 検出含む）で下されたかを切り分けられるよう
+    # 受領書に記録する（設計メモ §5）。penalty=0.0 は「LLM 層は呼ばれたが検出なし」、
+    # None は「LLM 層自体が呼ばれていない」を表す。
+    confidence_llm_penalty: float | None    = None
+    confidence_llm_detail:  str | None      = None
     # DEFER ワークフロー用フィールド
     deferral_reason:       str | None      = None
     resolution_method:     str | None      = None  # "autonomous" | "step_up" | "human_approved" | "human_denied" | None
@@ -223,6 +230,8 @@ class AuthorizationResult:
             "modified_params":    self.modified_params,
             "decision_source":    self.decision_source,
             "policy_rule_id":     self.policy_rule_id,
+            "confidence_llm_penalty": self.confidence_llm_penalty,
+            "confidence_llm_detail":  self.confidence_llm_detail,
             "deferral_reason":    self.deferral_reason,
             "proposed_decision":  self.proposed_decision,
             "resolution_method":  self.resolution_method,
@@ -257,6 +266,10 @@ class AuthorizationResult:
         }
         if self.policy_rule_id:
             d["policy_rule_id"] = self.policy_rule_id
+        if self.confidence_llm_penalty is not None:
+            d["confidence_llm_penalty"] = self.confidence_llm_penalty
+        if self.confidence_llm_detail:
+            d["confidence_llm_detail"] = self.confidence_llm_detail
         if self.proposed_decision:
             d["proposed_decision"] = self.proposed_decision
         if self.deferral_reason:

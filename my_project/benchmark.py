@@ -2,11 +2,14 @@
 
 Usage:
   pip install -e laarma_sdk
-  python my_project/benchmark.py
+  python my_project/benchmark.py                        # default: no API key needed
+  ANTHROPIC_API_KEY=... python my_project/benchmark.py --pipeline   # also runs pipeline_only cases
 
 Phase A (#112) removed the LLM-based decision layer (IntentAlignment) entirely.
 PolicyEngine.evaluate() is now the sole, deterministic decision path — there is
-no LLM call in it, so this runner has a single mode and needs no API key.
+no LLM call in it. The default run needs no API key: all cases use NullConfidenceLLM
+(a no-op stub for the Phase C confidence LLM detection layer in ContextAccumulator).
+Cases marked pipeline_only require a real ANTHROPIC_API_KEY and only run with --pipeline.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ if str(_root) not in sys.path:
 from unittest.mock import patch
 
 from laarma import AARMRuntime, Decision, EnvironmentContext, IdentityContext, MaintenanceWindow, load_policy
+from laarma.confidence_llm import NullConfidenceLLM
 from laarma.models import Action, AuthorizationResult
 from laarma.step_up_resolver import StepUpResolver
 from my_project.identity_keys import load_or_create_keypair
@@ -63,6 +67,11 @@ class BenchmarkCase:
     # 非 None のとき、デフォルトの policy.yaml ではなくこのパス（my_project/ からの相対）を
     # ロードする。回帰テスト専用ルールを配布用 policy.yaml に混在させないためのフィクスチャ差し替え。
     policy_file: str | None = None
+    # True のとき、実 LLM（confidence_llm.py の SemanticAmbiguityDetector）経由でのみ意味のある
+    # 検証であり、--pipeline 指定時にのみ実行する（API キーが要る）。#112 Phase C。
+    # --pipeline 未指定時は実行自体をスキップする。--pipeline 指定時に実行しても、LLM 出力に
+    # 依存し一発で安定しないことがあるため mismatch は fail ではなく informational 扱いにする。
+    pipeline_only: bool = False
     note: str | None = None  # ケースの検証意図・素性の説明（ロジックには使わない）
 
 
@@ -83,6 +92,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 identity=data.get("identity"),
                 known_regression_until=data.get("known_regression_until"),
                 policy_file=data.get("policy_file"),
+                pipeline_only=data.get("pipeline_only", False),
                 note=data.get("note"),
             ))
     return cases
@@ -120,7 +130,9 @@ def compare_modified_params(actual: dict[str, Any] | None, expected: dict[str, A
     return True
 
 
-def run_case(case: BenchmarkCase) -> tuple[Decision, dict[str, Any] | None, float, str | None, dict]:
+def run_case(
+    case: BenchmarkCase, pipeline_enabled: bool
+) -> tuple[Decision, dict[str, Any] | None, float, str | None, dict]:
     """Returns (decision, modified_params, elapsed_seconds, reason, context_summary)."""
     env = build_environment(case.environment)
     # case に identity.privilege_scope があればそれを使い、なければ評価対象ツールのみ許可する
@@ -145,12 +157,17 @@ def run_case(case: BenchmarkCase) -> tuple[Decision, dict[str, Any] | None, floa
     )
     policy_path = Path(__file__).parent / case.policy_file if case.policy_file else _POLICY_PATH
     policy = load_policy(policy_path)
+    # pipeline_only ケースを --pipeline 付きで実行するときだけ実 LLM
+    # （confidence_llm=None → AARMRuntime の既定ファクトリ経由で SemanticAmbiguityDetector）を
+    # 使う。それ以外は常に NullConfidenceLLM（実 API を叩かない）。#112 Phase C。
+    confidence_llm = None if (case.pipeline_only and pipeline_enabled) else NullConfidenceLLM()
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,
         environment=env,
         policy=policy,
         transform_registry=_TRANSFORM_REGISTRY,
+        confidence_llm=confidence_llm,
     )
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
@@ -235,6 +252,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run AARM PolicyEngine benchmark cases.")
     parser.add_argument("--data-file", default="benchmark_data.jsonl", help="Benchmark dataset JSONL file")
     parser.add_argument("--verbose", action="store_true", help="Show detailed case output")
+    parser.add_argument(
+        "--pipeline", action="store_true",
+        help="Also run pipeline_only cases through the real confidence LLM layer (needs ANTHROPIC_API_KEY)",
+    )
     args = parser.parse_args()
 
     data_path = Path(__file__).resolve().parent / args.data_file
@@ -247,15 +268,24 @@ def main() -> int:
     pass_count = 0
     fail_count = 0
     inform_count = 0
+    skip_count = 0
     summary: dict[str, int] = {d.value: 0 for d in Decision}
     mismatches: list[str] = []
     known_regression_mismatches: list[str] = []
+    skipped: list[str] = []
 
     print(f"Loaded {len(cases)} benchmark cases from {data_path}")
     print()
 
     for case in cases:
-        decision, modified_params, elapsed, reason, context = run_case(case)
+        if case.pipeline_only and not args.pipeline:
+            skip_count += 1
+            skipped.append(case.id)
+            if args.verbose:
+                print(f"⏭️  Case: {case.id} (skipped, pipeline_only — use --pipeline)\n")
+            continue
+
+        decision, modified_params, elapsed, reason, context = run_case(case, args.pipeline)
         total_time += elapsed
         summary[decision.value] += 1
 
@@ -263,15 +293,19 @@ def main() -> int:
             decision.value == case.expected_decision
             and compare_modified_params(modified_params, case.expected_modified_params)
         )
-        known_regression = case.known_regression_until is not None and not ok
+        # pipeline_only ケースは実 LLM の出力に依存し一発で安定しないことがあるため、
+        # known_regression_until が無くても mismatch は fail ではなく informational 扱いにする
+        # （#112 Phase C）。
+        known_regression = (case.known_regression_until is not None or case.pipeline_only) and not ok
 
         if ok:
             pass_count += 1
         elif known_regression:
             inform_count += 1
+            until = case.known_regression_until or "pipeline_only"
             known_regression_mismatches.append(
                 f"{case.id} (expected={case.expected_decision}, actual={decision.value}, "
-                f"until={case.known_regression_until})"
+                f"until={until})"
             )
         else:
             fail_count += 1
@@ -304,14 +338,18 @@ def main() -> int:
                     print(f"  data_classification: {dc}")
             print(f"  elapsed: {elapsed:.2f}s\n")
 
+    ran_count = len(cases) - skip_count
     print("Benchmark summary:")
     print(f"  cases:         {len(cases)}")
     print(f"  pass:          {pass_count}")
     print(f"  fail:          {fail_count}")
     if inform_count:
         print(f"  informational: {inform_count}  (known regressions, not counted as fail — see breakdown below)")
+    if skip_count:
+        print(f"  skipped:       {skip_count}  (pipeline_only, use --pipeline — see breakdown below)")
     print(f"  total time:    {total_time:.2f}s")
-    print(f"  avg time/case: {total_time / len(cases):.2f}s")
+    if ran_count:
+        print(f"  avg time/case: {total_time / ran_count:.2f}s")
     print("  decisions:")
     for d, count in summary.items():
         if count:
@@ -326,6 +364,11 @@ def main() -> int:
         print("\nInformational — known regressions (tracked, not counted as fail):")
         for entry in known_regression_mismatches:
             print(f"  - {entry}")
+
+    if skipped:
+        print("\nSkipped — pipeline_only (use --pipeline with ANTHROPIC_API_KEY set):")
+        for case_id in skipped:
+            print(f"  - {case_id}")
 
     step_up_fail_count = run_step_up_unit_tests()
     return 1 if (fail_count or step_up_fail_count) else 0

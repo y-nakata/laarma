@@ -88,6 +88,34 @@ rules:
         data_classification:
           contains: PII
 
+  # confidence_level（evaluability）参照ルール（条件10・15の移行、#112 Phase B3）。
+  # ツール限定はしない（confidence は distance と異なり危険性軸ではなく評価可能性の軸のため、
+  # 破壊的操作に絞る理由がない）。priority は他ルールと同じ既定(0)——production_delete_defer 等の
+  # 既存 priority 0 ルールと同一 priority で decision が競合すれば R3(b) により DEFER に落ちる
+  # （不確実さが重なった場合の安全側の帰結として妥当）。
+  #
+  # 決定論の confidence 計算（distance × 0.3 の減点 + scope_expansion 0.25 の減点）の下限は
+  # 0.45 であり、defer_low_confidence（条件10, <0.4）は現行の signal だけでは発火しない。
+  # 意味論的な曖昧さ（「古いファイル」等）を検出して confidence をさらに下げるのは Phase C の
+  # LLM 層の役目であり、本ルールはその参照先として先に配線しておく（機構のみ。
+  # docs/design/decision-layer-policy-engine.md §5）。
+  - id: step_up_low_confidence
+    decision: STEP_UP
+    reason: "アクションの評価確信度が低いため、追加確認が必要です。"
+    conditions:
+      context:
+        confidence_level:
+          gt: 0.4
+          lt: 0.6
+
+  - id: defer_low_confidence
+    decision: DEFER
+    reason: "アクションの評価確信度が著しく低いため、実行を保留します。"
+    conditions:
+      context:
+        confidence_level:
+          lt: 0.4
+
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:
   pii_keywords:

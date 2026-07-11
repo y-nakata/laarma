@@ -110,7 +110,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 7 | PII/CONFIDENTIAL を含まない | data_classification のポリシー参照 |
 | 8 | 破壊的でも明示意図と高 confidence | distance 小 + confidence 高のポリシー参照 |
 | 9 | 意図が曖昧でエージェントが未認可の自律判断 | confidence（evaluability）低 → DEFER。中身の解釈は #89、較正は #77（§4, §5） |
-| 10 | confidence < 0.4 かつ追加 context で解決可能 | DEFER トリガー (c)（`confidence < 閾値 → DEFER`） |
+| 10 | confidence < 0.4 かつ追加 context で解決可能 | DEFER トリガー (c)（`confidence ≤ 0.4 → DEFER`。境界 0.4 は条件15 の `0.4 < confidence < 0.6` と接続し、0.4 ちょうどが両条件の間で未発火にならないようにする） |
 | 11 | 安全だが明示的認可が欠落 | 条件9 と同じく confidence 低 → DEFER |
 | 12 | 情報収集系（read/list）は曖昧でも ALLOW | **廃止**。distance 小 + 非破壊 → ALLOW baseline で自然に出るため特別扱い不要 |
 | 13 | PII/CONFIDENTIAL の削除/重大アクセス | data_classification + destructive のポリシー参照 → STEP_UP（危険性軸の SDK 固定写像） |
@@ -275,9 +275,10 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 本メモの設計は試作段階の想定であり、実装で確認が取れているのは一部。概略:
 
-- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains）— #112 Phase B0 で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
-- **設計のみ・未実装**: δ を参照する個別の match predicate ルール（semantic_distance/data_classification/confidence の閾値・集合参照。条件1〜15 の移行対応。Phase B1〜B3 で段階実装）、DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕のみ設計選択で拾う）のうち δ 依存部分、confidence の evaluability 定義に基づく計算、多層防御 LLM の confidence 反映。いずれも Phase B1 以降の対象。
-- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さ・矛盾を低く算出するか。Phase A/B0 時点ではこれらは baseline ALLOW に素通りする既知の回帰であり（`benchmark_data.jsonl` の `known_regression_until: "Phase B"`）、Phase B1〜B3 とセットで回復を確認する。- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。
+- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains）— #112 Phase B0 で実装済み。semantic_distance・data_classification・confidence の個別ポリシールール（`deny_intent_mismatch_delete`・`step_up_pii_delete`・`step_up_low_confidence`/`defer_low_confidence`）— #112 Phase B1〜B3 で実装済み。confidence の evaluability 定義に基づく LLM 検出層（`confidence_llm.py`。`copy(src,src)` 型の意味論的矛盾・曖昧な意図の検出、fail-closed、受領書への減点幅・検出理由の記録）— #112 Phase C で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
+- **設計のみ・未実装**: DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証。
+- **未検証（実装後に benchmark で確認）**: デモシナリオ4/8 の再現性、条件1〜15 の移行が意図どおり decision を出すか、confidence が曖昧さ・矛盾を低く算出するかの網羅的な確認は Phase D の対象。`defer_dynamic_ambiguous_delete`（デフォルト実行、`known_regression_until: "Phase C"`）は Phase C の confidence LLM 検出層自体は実装されたが、デフォルト benchmark 実行では `NullConfidenceLLM` スタブを使うため素通りしたままで、既知回帰として残る——実 LLM 経路での再現は `defer_ambiguous_delete_llm_detected`（`pipeline_only`、`--pipeline` 実行時のみ）で個別に確認する。Phase D でこの既知回帰の扱い（デフォルト実行での回復を目指すか、`pipeline_only` 側の確認で足りるとするか）を含めて条件1〜15 を網羅的に再検証する。
+- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、composite risk（#100）。δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。
 
 ---
 

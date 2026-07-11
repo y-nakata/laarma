@@ -15,6 +15,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ._text_sanitize import _sanitize_recent_actions
+from .confidence_llm import create_default_confidence_llm
 from .distance_calculator import DistanceCalculator, create_default_distance_calculator
 from .models import Action, AuthorizationResult, SessionContext
 
@@ -68,12 +70,17 @@ def _compute_confidence(
     semantic_distance: float,
     scope_expansion: bool,
     action_matches_intent: bool,
+    llm_penalty: float = 0.0,
 ) -> float:
     """
     確信度を 0.0 (全く評価できない) 〜 1.0 (完全に評価できる) で算出する。
     AARM 仕様 §IV-C: confidence は「(a, C) を自信を持って評価できる度合い」であり、
     アクションの危険度ではない。危険度は data_classification シグナルを参照する
     ポリシー条件（STEP_UP / DENY）が担う。
+
+    llm_penalty は #112 Phase C の confidence LLM 検出層（confidence_llm.py）による
+    追加減点。決定論項（distance/scope_expansion/action_matches_intent）だけでは
+    捉えられない、意味論的に特定できる曖昧さ・矛盾の検出結果。
     """
     score = 1.0
 
@@ -88,6 +95,9 @@ def _compute_confidence(
     if action_matches_intent:
         score += 0.1
 
+    # LLM が検出した意味論的な曖昧さ・矛盾による追加減点（多層防御, #112 Phase C）
+    score -= llm_penalty
+
     return round(max(0.0, min(1.0, score)), 3)
 
 
@@ -98,6 +108,7 @@ class ContextAccumulator:
         metadata: dict[str, Any] | None = None,
         distance_calculator: DistanceCalculator | None = None,
         policy: Any | None = None,
+        confidence_llm: Any | None = None,
     ) -> None:
         self._context = SessionContext(user_intent=user_intent, metadata=metadata or {})
         self._receipts: list[dict]  = []
@@ -107,7 +118,10 @@ class ContextAccumulator:
         self._entity_set:           set[str]    = set()
         self._confidence_history:   list[float] = []
         self._action_matches_intent: list[bool] = []
+        self._confidence_llm_penalties: list[float]      = []
+        self._confidence_llm_details:   list[str | None] = []
         self._distance_calculator = distance_calculator or create_default_distance_calculator()
+        self._confidence_llm      = confidence_llm or create_default_confidence_llm()
         self._pii_keywords         = (policy.pii_keywords          if policy and policy.pii_keywords          is not None else _DEFAULT_PII_KEYWORDS)
         self._confidential_keywords = (policy.confidential_keywords if policy and policy.confidential_keywords is not None else _DEFAULT_CONFIDENTIAL_KEYS)
         self._sensitive_tools      = (policy.sensitive_tools        if policy and policy.sensitive_tools       is not None else _DEFAULT_SENSITIVE_TOOLS)
@@ -136,10 +150,22 @@ class ContextAccumulator:
         matches_intent = _action_matches_intent(
             self._context.user_intent, action.tool_name, action.parameters)
 
+        # #112 Phase C: 決定論項だけでは捉えられない意味論的な曖昧さ・矛盾を LLM で検出し、
+        # confidence への追加減点として反映する（LLM は decision を出さない）。
+        llm_penalty, llm_detail = self._confidence_llm.detect(
+            user_intent=self._context.user_intent,
+            tool_name=action.tool_name,
+            parameters=action.parameters,
+            recent_actions=_sanitize_recent_actions(self.recent_actions(n=5)),
+        )
+        self._confidence_llm_penalties.append(llm_penalty)
+        self._confidence_llm_details.append(llm_detail)
+
         confidence = _compute_confidence(
             semantic_distance=dist,
             scope_expansion=expanded,
             action_matches_intent=matches_intent,
+            llm_penalty=llm_penalty,
         )
         self._confidence_history.append(confidence)
 
@@ -182,6 +208,8 @@ class ContextAccumulator:
         c = self._confidence_history
         current_confidence = c[-1] if c else 1.0
         m = self._action_matches_intent
+        p = self._confidence_llm_penalties
+        det = self._confidence_llm_details
         return {
             "data_classification":      sorted(set(self._data_classification)),
             "semantic_distance":        d[-1] if d else 0.0,
@@ -190,6 +218,8 @@ class ContextAccumulator:
             "action_matches_intent":     m[-1] if m else False,
             "entity_set":               sorted(self._entity_set),
             "confidence_level":         current_confidence,
+            "confidence_llm_penalty":   p[-1] if p else 0.0,
+            "confidence_llm_detail":    det[-1] if det else None,
         }
 
     def drift_observation(self) -> dict:

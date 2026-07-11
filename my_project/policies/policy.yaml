@@ -78,6 +78,16 @@ rules:
         semantic_distance:
           gt: 0.64
 
+  - id: step_up_pii_delete
+    decision: STEP_UP
+    reason: "PII を含む可能性のあるファイル '{path}' の削除には追加確認が必要です。"
+    priority: 100
+    conditions:
+      tool: delete_file
+      context:
+        data_classification:
+          contains: PII
+
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:
   pii_keywords:

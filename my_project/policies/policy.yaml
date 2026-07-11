@@ -68,6 +68,16 @@ rules:
         - param_matches:
             path: 'database'
 
+  - id: deny_intent_mismatch_delete
+    decision: DENY
+    reason: "ユーザーの意図から乖離した削除操作 '{path}' を検出したため拒否しました。"
+    priority: 100
+    conditions:
+      tool: delete_file
+      context:
+        semantic_distance:
+          gt: 0.64
+
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:
   pii_keywords:

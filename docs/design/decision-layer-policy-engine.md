@@ -136,9 +136,13 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 この区別により、`benchmark_data.jsonl` の `defer_dynamic_ambiguous_delete`（シナリオ8 の再現ケース）
 は `known_regression_until: "Phase C"` のままデフォルト実行では baseline ALLOW に素通りし続けるが、
 これは「Phase C で直したはずが直っていない」のではなく「デフォルト実行が意図的にメカニズムをスタブ
-アウトしている」ことを表す。実際にシナリオ8 が LLM 検出込みで DEFER になるかは、`ANTHROPIC_API_KEY`
-を持つ環境での `--pipeline` 実行または `demo.py` 実行でのみ確認できる（#112 Phase D 時点ではこの
-セッションに `ANTHROPIC_API_KEY` が無く未確認。ユーザー環境での実行結果待ち）。
+アウトしている」ことを表す。実際にシナリオ8 が LLM 検出込みで DEFER になるかは `ANTHROPIC_API_KEY` を
+持つ環境での `--pipeline` 実行または `demo.py` 実行で確認できる——#112 Phase D で実行・確認済み:
+`python my_project/benchmark.py --pipeline` で `defer_ambiguous_delete_llm_detected`（DEFER, confidence≈0.363）・
+`step_up_semantic_contradiction_copy`（STEP_UP, confidence≈0.5）がいずれも期待どおりの decision になり、
+`python my_project/demo.py` のシナリオ8 でも `delete_file` アクションが confidence 0.363 で DEFER する
+ことを確認した（その後 DeferralResolver の自律解決〔#89〕が再評価し DENY に確定する後続処理も含めて、
+一連のフローが期待どおり動作している）。
 
 ### δ 参照の記法: `context.<signal>` 述語オブジェクト
 
@@ -309,9 +313,10 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   はメカニズム自体は実装済みだが、`benchmark.py` のデフォルト実行が意図的に `NullConfidenceLLM`
   スタブを使うため `defer_dynamic_ambiguous_delete` は `known_regression_until: "Phase C"` のまま
   素通りし続ける——詳細は §3「条件9/10/11: メカニズムとベンチマークのデフォルト実行の乖離」を参照。
-  実 LLM 経路（`demo.py`・`--pipeline`）での再現は `ANTHROPIC_API_KEY` を持つ環境での実行が必要で、
-  Phase D 実施セッションには API キーが無く未確認——ユーザー環境での実行結果待ち。条件2・14 は上記の
-  とおり未実装と確定。
+  実 LLM 経路（`demo.py`・`--pipeline`）での再現は `ANTHROPIC_API_KEY` を持つ環境での実行で
+  確認済み——`--pipeline` 実行で `defer_ambiguous_delete_llm_detected`・`step_up_semantic_contradiction_copy`
+  がいずれも期待どおりの decision になり、`demo.py` シナリオ8 でも `delete_file` が confidence 0.363
+  で DEFER することを確認した。条件2・14 は上記のとおり未実装と確定。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、
   composite risk（#100）、priority 体系化（#129。条件2・14 の割り当てを含む）。δ 参照ポリシーは
   本リファクタ内で段階実装（旧 #107 吸収）。

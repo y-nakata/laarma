@@ -105,10 +105,10 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 2 | action_matches_intent=false かつ distance>0.4 で破壊/書込 | distance + tool risk のポリシー参照。**未実装**（#112 Phase D で確認）: `distance > 0.4` を参照するルールはどこにも無い。唯一の distance 参照 DENY ルールは `deny_intent_mismatch_delete` の `0.64`（`delete_file` 限定）で、条件2 が言う `0.4` は宙に浮いている。本番+`delete_file` に限定した `0.4〜0.64` 帯の扱い（条件14 の STEP_UP 化）と合わせて **#129**（ルール priority の一貫した体系化）に申し送り済み。本番外・`delete_file` 以外の破壊/書込ツールへの一般化も未着手。 |
 | 3 | scope_expansion 検出かつ意図に正当化なし | **#99**（scope_expansion 産出の再設計）に委ねる既知の穴 |
 | 4 | Compositional Risk（アクション系列が攻撃ベクトル） | **#100**（composite risk）。危険性軸の拡張。FRAMEWORK 章では DEFER に値する状況の一つとして挙がるが、実装に下ろすと DEFER として拾えず DENY／#100 に振り分けられる（§4） |
-| 5 | action_matches_intent=true / 意図が対象を明示 | distance 小 + 危険信号なし → ALLOW baseline |
+| 5 | action_matches_intent=true / 意図が対象を明示 | 明示 ALLOW ルール化の対象（**#139**）。「distance 小 + 危険信号なし → ALLOW baseline で自然に出る」は #139 の3点（非重複無検証・明示性の喪失・将来衝突の非検知）で誤り。#139 で明示ルール化する。 |
 | 6 | semantic_distance < 0.3 | 明示 ALLOW ルール化の対象（**#139**）。「専用ルールは無く baseline ALLOW で自然に出るため不要」という従前の記述は、非重複が無検証・明示性の喪失・将来のルール追加との衝突非検知の3点で誤り。#139 で明示ルール化する。 |
 | 7 | PII/CONFIDENTIAL を含まない | 明示 ALLOW ルール化の対象（**#139**）。「`data_classification` 参照ルールが不発火なら baseline ALLOW で自然に出るため不要」という従前の記述は #139 の3点で誤り。#139 で明示ルール化する。 |
-| 8 | 破壊的でも明示意図と高 confidence | distance 小 + confidence 高のポリシー参照 |
+| 8 | 破壊的でも明示意図と高 confidence | distance 小 + confidence 高のポリシー参照。既に「ポリシー参照」と書かれ明示ルール寄りだが、#129 issuecomment-4971920088 が条件5,6,7,12 と同型に挙げているため、実際に明示ルールになっているか **#139** で点検する。 |
 | 9 | 意図が曖昧でエージェントが未認可の自律判断 | confidence（evaluability）低 → DEFER。中身の解釈は #89、較正は #77（§4, §5）。**メカニズムは実装済み（#112 Phase C）だが、`benchmark.py` のデフォルト実行では再現しない**（次項および検証状況を参照）。 |
 | 10 | confidence < 0.4 かつ追加 context で解決可能 | DEFER トリガー (c)（`confidence ≤ 0.4 → DEFER`。境界 0.4 は条件15 の `0.4 < confidence < 0.6` と接続し、0.4 ちょうどが両条件の間で未発火にならないようにする）。ルール自体（`defer_low_confidence`）は実装済みだが、**デフォルト実行では発火しない**（次項参照）。 |
 | 11 | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ に無く、実装に落とせる具体性を持たない。「認可されれば安全＝認可の欠落で保留」は DEFER の入口に解決可能性を課す形で、R3(a)(b)(c) のいずれでもない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもので、認可の欠落と評価可能性の低さは別軸。 |
@@ -117,7 +117,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 14 | 本番の高影響操作 | environment=production + destructive のポリシー参照 → STEP_UP（危険性軸の SDK 固定写像）。**未実装**（#112 Phase D で確認）: `policy.yaml` の本番 delete ルールは `deny_critical_file_delete_in_prod`（DENY・重要ファイル）と `production_delete_defer`（DEFER・その他）のみで、STEP_UP を出すルールが無い。条件13 と同型の危険性軸 SDK 固定写像でありながら Phase B の段階実装から漏れた項目。`production_delete_defer` は README シナリオ6「DEFER → DeferralResolver 自律解決」の実演でもあるため温存し、STEP_UP をどう priority で挟むかは条件2 の `0.4〜0.64` 帯と合わせて **#129** に申し送り済み。 |
 | 15 | confidence 0.4-0.6 かつ中程度リスク | confidence のポリシー参照（`0.4 < confidence < 0.6 → STEP_UP`）。**実装済み・再現確認済み**: `step_up_low_confidence`。`benchmark_data.jsonl` の `step_up_low_confidence_external_action`（デフォルト実行、決定論のみで発火）で確定再現する。 |
 
-移行先はおおむね次に分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,5,8,10,13,14,15。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9）、(4) 明示 ALLOW ルール化（条件 6,7,12。#139）。条件11 は廃止（#137）。
+移行先はおおむね次に分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,8,10,13,14,15。条件8 は明示ルール化済みか #139 で点検。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9）、(4) 明示 ALLOW ルール化（条件 5,6,7,12。#139）。条件11 は廃止（#137）。
 
 ### 条件9/10（confidence 低 → DEFER）: メカニズムとベンチマークのデフォルト実行の乖離
 

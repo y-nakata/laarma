@@ -82,14 +82,6 @@
       "items": { "type": "string" },
       "description": "絶対禁止ツールのリスト。呼び出されると即 DENY。"
     },
-    "required_params": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "array",
-        "items": { "type": "string" }
-      },
-      "description": "ツールごとの必須パラメータ。不足時は DEFER。"
-    },
     "max_actions": {
       "type": "integer",
       "minimum": 1,

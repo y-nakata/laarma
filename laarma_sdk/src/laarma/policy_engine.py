@@ -123,7 +123,6 @@ class StaticRule:
 class Policy:
     """PolicyEngine に渡すポリシー設定。load_policy() で YAML/JSON ファイルから生成する。"""
     denied_tools:                   set[str]             = field(default_factory=set)
-    required_params:                dict[str, list[str]] = field(default_factory=dict)
     max_actions:                    int                  = 50
     rules:                          list[StaticRule]     = field(default_factory=list)
     pii_keywords:          frozenset[str] | None = None
@@ -135,11 +134,6 @@ class Policy:
 
 DEFAULT_POLICY = Policy(
     denied_tools={"drop_database", "delete_all_records", "exfiltrate_data", "disable_logging"},
-    required_params={
-        "write_file":  ["path", "content"],
-        "delete_file": ["path"],
-        "send_email":  ["to", "subject", "body"],
-    },
 )
 
 
@@ -287,22 +281,7 @@ class PolicyEngine:
                     decision_source="policy_engine",
                 )
 
-        # 3. required_params のチェック — 最終 params（MODIFY 変換後があればそれ）に対して行う
-        #    固定階層（rules の priority 解決には参加しない）。terminal DEFER。
-        missing = [
-            k for k in p.required_params.get(action.tool_name, [])
-            if k not in current_params
-        ]
-        if missing:
-            return AuthorizationResult(
-                decision=Decision.DEFER,
-                reason=f"'{action.tool_name}' に必須パラメータが足りません: {missing}",
-                action=action,
-                modified_params=rule_proposal.modified_params if rule_proposal else None,
-                decision_source="required_params",
-            )
-
-        # 4. 最大アクション数の制限 — DENY は terminal。固定階層。
+        # 3. 最大アクション数の制限 — DENY は terminal。固定階層。
         action_count = sum(1 for e in context.action_history if e.get("type") != "tool_output")
         if action_count >= p.max_actions:
             return AuthorizationResult(
@@ -312,9 +291,9 @@ class PolicyEngine:
                 decision_source="policy_engine",
             )
 
-        # 5. rules 評価の結果をそのまま最終決定とする。マッチが無ければベースライン ALLOW。
-        #    このベースライン ALLOW は privilege_scope・denied_tools・required_params・
-        #    max_actions を全て通過した上での ALLOW であり、無審査の default ではない。
+        # 4. rules 評価の結果をそのまま最終決定とする。マッチが無ければベースライン ALLOW。
+        #    このベースライン ALLOW は privilege_scope・denied_tools・max_actions を
+        #    全て通過した上での ALLOW であり、無審査の default ではない。
         if rule_proposal is not None:
             return rule_proposal
         return AuthorizationResult(

@@ -68,7 +68,7 @@ laarma/
     ↓ PolicyEngine.evaluate()  式(3)の π として (a, C, E) を評価し、常に terminal な結果を返す
     │  privilege_scope / denied_tools（コンテキスト評価なしの静的ゲート）→ DENY
     │  rules（全マッチ収集 → priority 解決。同一 priority で decision が競合したら DEFER）
-    │  required_params（不足） → DEFER  |  max_actions（超過） → DENY
+    │  max_actions（超過） → DENY
     │  どれにもマッチしない → baseline ALLOW
     ↓ ALLOW / DENY / MODIFY
     ↓ DEFER   → [DeferralResolver]  追加コンテキスト収集 → ALLOW / DENY / STEP_UP に再評価

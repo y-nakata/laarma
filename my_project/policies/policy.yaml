@@ -5,7 +5,6 @@
 #
 # キー説明:
 #   denied_tools    : 絶対禁止ツール。呼び出されると即 DENY。
-#   required_params : ツールごとの必須パラメータ。不足時は DEFER。
 #   max_actions     : セッション内の最大アクション数。超過時は DENY。
 #   rules           : 追加の静的ルール（全マッチを収集し、最も高い priority のルールを適用。
 #                     同一 priority で decision が競合する場合は DEFER）。
@@ -15,17 +14,6 @@ denied_tools:
   - delete_all_records
   - exfiltrate_data
   - disable_logging
-
-required_params:
-  write_file:
-    - path
-    - content
-  delete_file:
-    - path
-  send_email:
-    - to
-    - subject
-    - body
 
 max_actions: 50
 

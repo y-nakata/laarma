@@ -23,7 +23,7 @@
 現行の `policy_engine.py` の `evaluate()` は、逐次パイプラインで動く:
 
 ```
-privilege_scope → denied_tools → 静的ルール収束ループ → required_params → max_actions → _confirm_with_ia
+privilege_scope → denied_tools → 静的ルール収束ループ → max_actions → _confirm_with_ia
 ```
 
 最後の `_confirm_with_ia` が心臓部で、**LLM ベースの `IntentAlignment`（intent_alignment.py）** に (a, C, E) を渡し、

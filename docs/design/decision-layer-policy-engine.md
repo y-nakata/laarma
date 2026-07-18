@@ -106,22 +106,22 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 3 | scope_expansion 検出かつ意図に正当化なし | **#99**（scope_expansion 産出の再設計）に委ねる既知の穴 |
 | 4 | Compositional Risk（アクション系列が攻撃ベクトル） | **#100**（composite risk）。危険性軸の拡張。FRAMEWORK 章では DEFER に値する状況の一つとして挙がるが、実装に下ろすと DEFER として拾えず DENY／#100 に振り分けられる（§4） |
 | 5 | action_matches_intent=true / 意図が対象を明示 | distance 小 + 危険信号なし → ALLOW baseline |
-| 6 | semantic_distance < 0.3 | **廃止と同型**（#112 Phase D で確認）。専用の閾値参照ルールは無く、他ルールが不発火のときの baseline ALLOW で自然に出るため特別扱い不要（条件12 と同じ理由）。 |
-| 7 | PII/CONFIDENTIAL を含まない | **廃止と同型**（#112 Phase D で確認）。専用ルールは無く、`data_classification` を参照する STEP_UP/DENY ルール（条件13 等）が不発火のときの baseline ALLOW で自然に出るため特別扱い不要（条件12 と同じ理由）。 |
+| 6 | semantic_distance < 0.3 | 明示 ALLOW ルール化の対象（**#139**）。「専用ルールは無く baseline ALLOW で自然に出るため不要」という従前の記述は、非重複が無検証・明示性の喪失・将来のルール追加との衝突非検知の3点で誤り。#139 で明示ルール化する。 |
+| 7 | PII/CONFIDENTIAL を含まない | 明示 ALLOW ルール化の対象（**#139**）。「`data_classification` 参照ルールが不発火なら baseline ALLOW で自然に出るため不要」という従前の記述は #139 の3点で誤り。#139 で明示ルール化する。 |
 | 8 | 破壊的でも明示意図と高 confidence | distance 小 + confidence 高のポリシー参照 |
 | 9 | 意図が曖昧でエージェントが未認可の自律判断 | confidence（evaluability）低 → DEFER。中身の解釈は #89、較正は #77（§4, §5）。**メカニズムは実装済み（#112 Phase C）だが、`benchmark.py` のデフォルト実行では再現しない**（次項および検証状況を参照）。 |
 | 10 | confidence < 0.4 かつ追加 context で解決可能 | DEFER トリガー (c)（`confidence ≤ 0.4 → DEFER`。境界 0.4 は条件15 の `0.4 < confidence < 0.6` と接続し、0.4 ちょうどが両条件の間で未発火にならないようにする）。ルール自体（`defer_low_confidence`）は実装済みだが、**デフォルト実行では発火しない**（次項参照）。 |
-| 11 | 安全だが明示的認可が欠落 | 条件9 と同じく confidence 低 → DEFER。条件9/10 と同一のルール・同一の制約（次項参照）。 |
-| 12 | 情報収集系（read/list）は曖昧でも ALLOW | **廃止**。distance 小 + 非破壊 → ALLOW baseline で自然に出るため特別扱い不要 |
+| 11 | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ に無く、実装に落とせる具体性を持たない。「認可されれば安全＝認可の欠落で保留」は DEFER の入口に解決可能性を課す形で、R3(a)(b)(c) のいずれでもない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもので、認可の欠落と評価可能性の低さは別軸。 |
+| 12 | 情報収集系（read/list）は曖昧でも ALLOW | 明示 ALLOW ルール化の対象（**#139**）。「distance 小 + 非破壊 → ALLOW baseline で自然に出るため不要」という従前の記述は #139 の3点で誤り（かつ情報収集の distance は小さくない実測がある——本 Issue #128 参照）。後半原則「介入点は risk が materialize する破壊/書込アクション」の扱いは #128 に係属。 |
 | 13 | PII/CONFIDENTIAL の削除/重大アクセス | data_classification + destructive のポリシー参照 → STEP_UP（危険性軸の SDK 固定写像）。**実装済み**: `step_up_pii_delete`。`benchmark_data.jsonl` の `step_up_pii_delete` ケースで確定再現する。 |
 | 14 | 本番の高影響操作 | environment=production + destructive のポリシー参照 → STEP_UP（危険性軸の SDK 固定写像）。**未実装**（#112 Phase D で確認）: `policy.yaml` の本番 delete ルールは `deny_critical_file_delete_in_prod`（DENY・重要ファイル）と `production_delete_defer`（DEFER・その他）のみで、STEP_UP を出すルールが無い。条件13 と同型の危険性軸 SDK 固定写像でありながら Phase B の段階実装から漏れた項目。`production_delete_defer` は README シナリオ6「DEFER → DeferralResolver 自律解決」の実演でもあるため温存し、STEP_UP をどう priority で挟むかは条件2 の `0.4〜0.64` 帯と合わせて **#129** に申し送り済み。 |
 | 15 | confidence 0.4-0.6 かつ中程度リスク | confidence のポリシー参照（`0.4 < confidence < 0.6 → STEP_UP`）。**実装済み・再現確認済み**: `step_up_low_confidence`。`benchmark_data.jsonl` の `step_up_low_confidence_external_action`（デフォルト実行、決定論のみで発火）で確定再現する。 |
 
-移行先はおおむね三つに分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,5,6,7,8,10,13,14,15。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9,11）。廃止は条件 12。
+移行先はおおむね次に分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,5,8,10,13,14,15。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9）、(4) 明示 ALLOW ルール化（条件 6,7,12。#139）。条件11 は廃止（#137）。
 
-### 条件9/10/11（confidence 低 → DEFER）: メカニズムとベンチマークのデフォルト実行の乖離
+### 条件9/10（confidence 低 → DEFER）: メカニズムとベンチマークのデフォルト実行の乖離
 
-条件9/10/11 が指す confidence 低下 → DEFER のメカニズム（`defer_low_confidence` ルールと、それを
+条件9/10 が指す confidence 低下 → DEFER のメカニズム（`defer_low_confidence` ルールと、それを
 発火させうる confidence LLM 検出層 `confidence_llm.py` の `SemanticAmbiguityDetector`）は #112 Phase C
 で実装済みだが、`my_project/benchmark.py` の**デフォルト実行**では再現しない。これは不具合ではなく、
 ベンチマークがコスト・レイテンシ最適化のため `confidence_llm` に `NullConfidenceLLM`（常に検出なしを
@@ -315,17 +315,17 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証。
 - **条件1〜15 の再検証完了（#112 Phase D）**: 条件1・13・15 はデフォルト benchmark 実行で確定再現
   （`deny_dynamic_delete_intent_mismatch`・`step_up_pii_delete`・`step_up_low_confidence_external_action`）。
-  条件6・7 は条件12 と同型（baseline ALLOW で自然に出るため専用ルール不要、機能不足ではない）と確認。
-  条件3・4・12 は既存の記述どおり（別 Issue の穴／廃止）。条件9/10/11（デモシナリオ8「古いファイル」）
+  条件6・7・12 は明示 ALLOW ルール化の対象（#139）。「baseline ALLOW で自然に出るため専用ルール不要」という従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤り。
+  条件3・4 は既存の記述どおり（別 Issue の穴）。条件11 は廃止（#137）。条件9/10（デモシナリオ8「古いファイル」）
   はメカニズム自体は実装済みだが、`benchmark.py` のデフォルト実行が意図的に `NullConfidenceLLM`
   スタブを使うため `defer_dynamic_ambiguous_delete` は `known_regression_until: "Phase C"` のまま
-  素通りし続ける——詳細は §3「条件9/10/11: メカニズムとベンチマークのデフォルト実行の乖離」を参照。
+  素通りし続ける——詳細は §3「条件9/10: メカニズムとベンチマークのデフォルト実行の乖離」を参照。
   実 LLM 経路（`demo.py`・`--pipeline`）での再現は `ANTHROPIC_API_KEY` を持つ環境での実行で
   確認済み——`--pipeline` 実行で `defer_ambiguous_delete_llm_detected`・`step_up_semantic_contradiction_copy`
   がいずれも期待どおりの decision になった。`demo.py` シナリオ8 でも `delete_file` が confidence 0.363
   で DEFER に入ることは確認したが、その先の `DeferralResolver` による自律解決は保留中で未実行の
   アクションを「実行済み・重複」と誤認した根拠不成立の DENY であり、正常な DEFER 解決の確認には
-  なっていない（詳細は §3「条件9/10/11」節末尾。DEFER 解決層の LLM decision 除去は #135 で扱う）。
+  なっていない（詳細は §3「条件9/10」節末尾。DEFER 解決層の LLM decision 除去は #135 で扱う）。
   条件2・14 は上記のとおり未実装と確定。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、
   composite risk（#100）、priority 体系化（#129。条件2・14 の割り当てを含む）。δ 参照ポリシーは

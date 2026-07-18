@@ -70,7 +70,6 @@ def load_policy(path: str | Path) -> Policy:
 
     return Policy(
         denied_tools=set(data.get("denied_tools", [])),
-        required_params={k: list(v) for k, v in data.get("required_params", {}).items()},
         max_actions=int(data.get("max_actions", 50)),
         rules=rules,
         pii_keywords=_frozenset_or_none(dc.get("pii_keywords")),

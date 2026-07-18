@@ -16,7 +16,6 @@ runtime = AARMRuntime(user_intent=..., policy=policy, transform_registry=...)
 | キー | 説明 |
 |-----|------|
 | `denied_tools` | 絶対禁止ツール。呼び出されると即 DENY |
-| `required_params` | ツールごとの必須パラメータ。不足時は DEFER |
 | `max_actions` | セッション内の最大アクション数。超過時は DENY |
 | `rules` | 追加の静的ルール（DENY / DEFER / MODIFY）。条件にマッチした最初のルールを適用 |
 

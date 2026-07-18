@@ -188,7 +188,7 @@ class AuthorizationResult:
     timestamp:             datetime        = field(default_factory=lambda: datetime.now(timezone.utc))
     # ポリシー参照 — 仕様 R5: "receipt must include the policy context used in evaluation"
     policy_rule_id:        str | None      = None   # 発火した StaticRule.id (PolicyEngine のみ)
-    decision_source:       str             = "policy_engine"  # "policy_engine" | "denied_tools" | "privilege_scope" | "required_params" | "baseline_allow" | "deferral_resolver" | "step_up_resolver"
+    decision_source:       str             = "policy_engine"  # "policy_engine" | "denied_tools" | "privilege_scope" | "baseline_allow" | "deferral_resolver" | "step_up_resolver"
     # #112 Phase C: confidence 計算への LLM 検出層による減点幅・検出理由。decision には
     # 関与しない（decision を出すのはポリシーの confidence 閾値ルール）が、どの decision が
     # 決定論由来でどれが confidence 経由（LLM 検出含む）で下されたかを切り分けられるよう

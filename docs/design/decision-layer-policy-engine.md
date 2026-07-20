@@ -91,6 +91,31 @@ decision を出す LLM 判定（現行 IntentAlignment）は除去する。**
 
 MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしないよう配慮したのは、提案/上書きモデルで「MODIFY 提案 → その後 LLM が意図整合性を見て上書き」しうる構造だったため、MODIFY で確定すると意図整合性チェックを飛ばす懸念があったからである。priority エンジン化で順序が「後で上書き」から「高 priority ルールが先に勝つ」へ反転するため、意図整合性を担う δ 参照ルールを MODIFY より高 priority に配置すれば、MODIFY が terminal でも素通りしない。これは強制パスではなく priority 配置の規律であり、δ 参照ルールの実装（Phase B）で担保する。
 
+### priority 帯の確定（#129）
+
+決定層の priority 解決（本節）に用いる priority を、安全序列 DENY > DEFER > STEP_UP > MODIFY > ALLOW を priority の大小に対応させた帯に確定する（#129、commit dcc67b6 で `policy.yaml` に反映済み）。
+
+異なる decision は異なる帯に置く。`_resolve_priority()` は同一 priority で decision が割れると R3(b) の competition として terminal DEFER に落とすため、decision ごとに帯を分けることで、上位の決定が競合ではなく priority で正しく勝つ。
+
+| priority | 決定 | 帯の意味 | 現存ルール |
+|---|---|---|---|
+| 1000 | DENY | Forbidden（δ 非参照の静的 DENY・不可侵最上位） | `deny_critical_file_delete_in_prod` |
+| 900 | DENY | 意図整合性 DENY（`semantic_distance` 参照） | `deny_intent_mismatch_delete` |
+| 800 | DENY | 文脈依存 DENY（組織固有 DENY 用に予約） | （なし） |
+| 710 | DEFER | カスタム DEFER の詳細化・穴あけ | `production_delete_defer` |
+| 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
+| 600 | STEP_UP | | `step_up_pii_delete` / `step_up_low_confidence` |
+| 500 | MODIFY | | `unsafe_write_path` |
+| 100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用に予約） | （なし） |
+| 0 | baseline | priority 無指定の既定値 | |
+
+- **Forbidden(1000)**: `environment_type`（静的環境で AARM の C ではない）と path（`action.param`）のみ参照する δ 非参照の静的 DENY なので、Forbidden 帯の定義に合致する。
+- **意図整合性 DENY(900) が STEP_UP(600)・MODIFY(500) を覆す**。距離大の PII 削除で DENY と STEP_UP が同値 priority 100 だったバグ（#129 issuecomment-4971920088）を帯分離で解消。意図逸脱な write が MODIFY で黙って basename 化される「変換を伴った fail-open」も 900 > 500 で回避される。
+- **DEFER 帯を 710/700 に分ける**のは、`production_delete_defer`（特定状況に限定）を `defer_low_confidence`（包括土台）より上に置き、どちらの reason を出すかを priority で明示するため（YAML 記述順という別軸に依存させない）。両者は同時発火しても両方 DEFER なので competition しない。
+- **帯は幅を持つ**（例: 700 番台）。帯どうしの順序が骨格で、帯内の刻みは詳細化の表現。
+- **800（文脈依存 DENY）と 100（ctx-ALLOW）は現状該当ルールなしの予約帯**。
+- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に載る予定。両条件の新規実装は #142 で詰めて本表に反映する。
+
 ---
 
 ## 3. 現行 IntentAlignment の判定基準（条件1〜15）の移行先

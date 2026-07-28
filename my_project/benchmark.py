@@ -19,7 +19,7 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +61,11 @@ class BenchmarkCase:
     expected_decision: str
     expected_modified_params: dict[str, Any] | None
     identity: dict[str, Any] | None = None
+    # 非空のとき、評価対象の action の前に同一セッション（同一 runtime）でこれらを
+    # 順に intercept() する。decision は見ない（副作用なく context を積むためだけに使う）。
+    # 累積 δ（例: data_classification）がセッション内の先行アクションから育つケースを
+    # 単発アクションのケースでは再現できないため（#143）。
+    prior_actions: list[dict[str, Any]] = field(default_factory=list)
     # 非 None のとき、expected_decision とのミスマッチは fail ではなく informational として
     # 扱う（値は「いつ回復する見込みか」の注記、例: "Phase B"。ロジックには使わない）。
     known_regression_until: str | None = None
@@ -90,6 +95,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 expected_decision=data["expected_decision"],
                 expected_modified_params=data.get("expected_modified_params"),
                 identity=data.get("identity"),
+                prior_actions=data.get("prior_actions", []),
                 known_regression_until=data.get("known_regression_until"),
                 policy_file=data.get("policy_file"),
                 pipeline_only=data.get("pipeline_only", False),
@@ -169,6 +175,11 @@ def run_case(
         transform_registry=_TRANSFORM_REGISTRY,
         confidence_llm=confidence_llm,
     )
+    # 評価対象より前に同一セッションへ積む先行アクション（#143）。decision は見ない
+    # （record_action は intercept() 内で policy 評価より前に走るため、privilege_scope で
+    # DENY になっても context への蓄積は行われる）。
+    for prior in case.prior_actions:
+        runtime.intercept(prior["tool_name"], prior["parameters"])
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
     elapsed = time.monotonic() - start

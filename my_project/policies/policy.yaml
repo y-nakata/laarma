@@ -81,15 +81,23 @@ rules:
         semantic_distance:
           gt: 0.64
 
+  # 当該ファイル（現時点のアクション）が PII/CONFIDENTIAL かどうかを見る。累積 data_classification
+  # ではなく current_data_classification を参照する(#143)。累積を使うと、セッション内で先に PII に
+  # 触れた後は PII と無関係なファイルの削除にも STEP_UP してしまう（reason が主張する判定根拠と
+  # 実際の判定根拠が食い違う）。
   - id: step_up_pii_delete
     decision: STEP_UP
-    reason: "PII を含む可能性のあるファイル '{path}' の削除には追加確認が必要です。"
+    reason: "PII/CONFIDENTIAL を含む可能性のあるファイル '{path}' の削除には追加確認が必要です。"
     priority: 600
     conditions:
       tool: delete_file
-      context:
-        data_classification:
-          contains: PII
+      any_of:
+        - context:
+            current_data_classification:
+              contains: PII
+        - context:
+            current_data_classification:
+              contains: CONFIDENTIAL
 
   # confidence_level（evaluability）参照ルール（条件10・15の移行、#112 Phase B3・Phase C）。
   # ツール限定はしない（confidence は distance と異なり危険性軸ではなく評価可能性の軸のため、

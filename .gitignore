@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 aarm_audit.jsonl
 .env
+refdocs/
 
 # アイデンティティ署名の秘密鍵・鍵ペア（non-repudiation / R6）
 # 各主体（Human/Agent/Service）の秘密鍵は決してコミットしない。

@@ -106,7 +106,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
 | 600 | STEP_UP | | `step_up_pii_delete` / `step_up_sensitive_read` / `step_up_low_confidence` |
 | 500 | MODIFY | | `unsafe_write_path` |
-| 100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用に予約） | （なし） |
+| 100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用） | `allow_information_gathering` |
 | 0 | baseline | priority 無指定の既定値 | |
 
 - **Forbidden(1000)**: `environment_type`（静的環境で AARM の C ではない）と path（`action.param`）のみ参照する δ 非参照の静的 DENY なので、Forbidden 帯の定義に合致する。

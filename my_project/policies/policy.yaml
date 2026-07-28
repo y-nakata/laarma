@@ -18,7 +18,7 @@
 #    700 番台  DEFER（700=confidence 包括土台、710 以上=カスタム DEFER の詳細化・穴あけ）
 #    600       STEP_UP
 #    500       MODIFY
-#    100       ctx-ALLOW（#139 の明示 ALLOW ルール用に予約・現状該当ルールなし）
+#    100       ctx-ALLOW（#139 の明示 ALLOW ルール用）
 #      0       baseline（priority 無指定のルールの既定値）
 
 denied_tools:
@@ -148,6 +148,19 @@ rules:
       context:
         confidence_level:
           lte: 0.4
+
+  # 情報収集系は全体の意図が曖昧でも ALLOW する（条件12前半、#142・#139）。意図の曖昧さ
+  # （semantic_distance/confidence_level）は条件に書かない。上位帯（DENY/DEFER/STEP_UP）が
+  # 発火すればそちらが勝つ——機微データ（PII/CONFIDENTIAL）を含む read_file は
+  # step_up_sensitive_read（600）が本ルール（100）に優先し STEP_UP になる。
+  - id: allow_information_gathering
+    decision: ALLOW
+    priority: 100                # ctx-ALLOW 帯（#129）
+    reason: "情報収集系の操作のため許可します。"
+    conditions:
+      any_of:
+        - tool: read_file
+        - tool: list_files
 
 # データ分類キーワード（省略するとデフォルト値を使用）
 data_classification:

@@ -1,0 +1,18 @@
+# テスト専用フィクスチャ: context.<signal> の boolean 直接値述語（#141）の疎通確認用。
+#
+# benchmark_data.jsonl の context_predicate_boolean_* のみが policy_file 経由でこのファイルを
+# ロードする。配布用 my_project/policies/policy.yaml にはテスト専用ルールを混在させない。
+#
+# boolean シグナル（action_matches_intent / scope_expansion_detected / scope_expansion_recent）は
+# 演算子オブジェクトでなく直接値（true/false）で書く。3シグナルとも _match_context_predicate の
+# 同一の「dict でなければ等値比較」分岐を通るため、代表として action_matches_intent のみ検証する。
+
+rules:
+  - id: _test_context_action_matches_intent_true
+    decision: DENY
+    reason: "テスト専用: context.action_matches_intent の boolean 直接値述語（true）の発火確認。"
+    priority: 5
+    conditions:
+      tool: delete_file
+      context:
+        action_matches_intent: true

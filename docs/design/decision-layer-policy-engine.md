@@ -100,7 +100,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | priority | 決定 | 帯の意味 | 現存ルール |
 |---|---|---|---|
 | 1000 | DENY | Forbidden（δ 非参照の静的 DENY・不可侵最上位） | `deny_critical_file_delete_in_prod` |
-| 900 | DENY | 意図整合性 DENY（`semantic_distance` 参照） | `deny_intent_mismatch_delete` |
+| 900 | DENY | 意図整合性 DENY（`semantic_distance`・`action_matches_intent`・`scope_expansion_detected` 参照） | `deny_intent_mismatch_destructive` / `deny_scope_expansion_unjustified` |
 | 800 | DENY | 文脈依存 DENY（組織固有 DENY 用に予約） | （なし） |
 | 710 | DEFER | カスタム DEFER の詳細化・穴あけ | `production_delete_defer` |
 | 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
@@ -134,7 +134,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 |---|---|---|---|
 | 1 | DENY | 意図と矛盾/無相関（読めと言われ write/delete） | 単一の δ 信号に写像しない（`action_matches_intent` より広い意味論的判断のため）。独立した包括 DENY ルールは作らず、意味論的整合の判断は整合信号（**#128**）に委ねる。原文が write/delete 両方をカバーする点（既存ルールの `write_file` 抜け）は条件2 のルールで補完 |
 | 2 | DENY | `action_matches_intent=false` **かつ** `semantic_distance>0.4` の破壊/書込 | `deny_intent_mismatch_destructive`（DENY・900）。既存 `deny_intent_mismatch_delete` を置換。既存の `distance>0.64` 単独条件は、AND ゲートを落とした代償に閾値を吊り上げた近似で原文にない値のため、0.4 に戻して `action_matches_intent=false` との AND を復元し、`write_file`/destructive 群へ拡張する |
-| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。`scope_expansion_detected` の産出が不完全なため暫定移植（本格対応は **#99**） |
+| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。`scope_expansion_detected` の産出が不完全なため暫定移植（本格対応は **#99**）。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
 | 4 | DENY | Compositional Risk（アクション系列が攻撃ベクトル） | **移植対象外**。判定する信号が δ になく決定論ルールに落ちない。将来対応は **#100**（危険性軸の拡張）。FRAMEWORK 章の DEFER 記述と重なるが、帰属先は DEFER でなく危険性軸（§4） |
 | 5 | ALLOW | `action_matches_intent=true` または要求が対象を明示 | `allow_action_matches_intent`（ALLOW・ctx-ALLOW 帯）。原文の OR 後半は `action_matches_intent` の定義そのものなので前半に吸収 |
 | 6 | ALLOW | `semantic_distance < 0.3` | `allow_low_semantic_distance`（ALLOW・ctx-ALLOW 帯）。条件2 の `>0.4` との間の 0.3〜0.4 は明示基準なしで空ける（原設計も同帯に基準を持たない） |
@@ -182,6 +182,16 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 出させる構造自体は変わっていないため、他の DEFER 経路（例: `defer_low_confidence` が他要因で単独発火する
 場合）では依然として起こりうる。この構造上の不具合は解消されておらず、DEFER 解決層の LLM decision
 除去は #135 で扱う。
+
+条件3（`deny_scope_expansion_unjustified`、#142）実装により、`step_up_low_confidence` にも同種の
+影響が生じた。既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）は
+`scope_expansion_detected=true` かつ `action_matches_intent=false` を満たすため条件3 に該当し、
+STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名）。`_compute_confidence`
+の決定論項は distance のみでは下限 0.7 までしか下げられず、0.4〜0.6 の STEP_UP 帯に入れるには
+scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の DENY 条件も満たしてしまうため、
+`step_up_low_confidence` をデフォルト実行（非 `--pipeline`）で発火させる決定論的ケースが構造的に
+作れなくなった。メカニズム自体は `--pipeline` 実行の `step_up_semantic_contradiction_copy`
+（confidence LLM 検出層による減点）で引き続き検証される。
 
 ### δ 参照の記法: `context.<signal>` 述語オブジェクト
 
@@ -364,7 +374,8 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - **条件1〜15 の再検証完了（#112 Phase D）**: 条件1・13・15 はデフォルト benchmark 実行で確定再現
   （`deny_dynamic_delete_intent_mismatch`・`step_up_pii_delete`・`step_up_low_confidence_external_action`）。
   条件6・7・12 は明示 ALLOW ルール化の対象（#139）。「baseline ALLOW で自然に出るため専用ルール不要」という従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤り。
-  条件3・4 は既存の記述どおり（別 Issue の穴）。条件11 は廃止（#137）。条件9/10（confidence 低下 →
+  条件3 は `deny_scope_expansion_unjustified` として実装済み（#142）。条件4 は既存の記述どおり
+  （別 Issue の穴、#100）。条件11 は廃止（#137）。条件9/10（confidence 低下 →
   DEFER のメカニズム自体）は #112 Phase C で実装済みで `step_up_semantic_contradiction_copy`
   （`--pipeline` 実行）で確認できるが、当初の実演シナリオだった旧デモシナリオ8「古いファイル」は
   条件2（#142）実装後は confidence LLM 検出層に到達する前に DENY で確定するようになった——詳細は

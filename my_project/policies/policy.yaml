@@ -138,6 +138,21 @@ rules:
         semantic_distance:
           gt: 0.4
 
+  # scope_expansion_detected（想定スコープ外のツールへのアクセス）かつ action_matches_intent=false
+  # （要求がそのツール/対象を明示参照しない＝意図での正当化がない）を検出したら DENY する（条件3、
+  # #142）。原文の "no justification in user_intent" を action_matches_intent=false で近似する
+  # 暫定移植（scope_expansion_detected の産出自体の本格的な再設計は #99）。semantic_distance は
+  # 絡めない（条件2 と異なり、意図整合の信号同士の掛け合わせに留める）。tool は非限定
+  # （external_tools に限らず scope_expansion_detected を見るツール全般が対象）。
+  - id: deny_scope_expansion_unjustified
+    decision: DENY
+    priority: 900
+    reason: "ユーザーの意図で正当化されないスコープ外アクセスを検出したため拒否しました。"
+    conditions:
+      context:
+        scope_expansion_detected: true
+        action_matches_intent: false
+
   # 当該ファイル（現時点のアクション）が PII/CONFIDENTIAL かどうかを見る。累積 data_classification
   # ではなく current_data_classification を参照する(#143)。累積を使うと、セッション内で先に PII に
   # 触れた後は PII と無関係なファイルの削除にも STEP_UP してしまう（reason が主張する判定根拠と

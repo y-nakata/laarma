@@ -150,37 +150,38 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 
 移行先はおおむね次に分かれる: (1) δ・tool・環境を参照するポリシールール（条件 2,3,5,6,7,8,12前半,13,14,15）、(2) 別 Issue に委ねる（条件1=#128、条件4=#100）、(3) 既存ルールが既に正しい形で新規不要（条件10,15）、(4) 処遇不要・廃止（条件9,11=#137）。各条件の詳細な検討（ルール文案・他ルールとの非重複検証・実装順の制約）は #142。
 
-### 条件9/10（confidence 低 → DEFER）: メカニズムとベンチマークのデフォルト実行の乖離
+### 条件9/10（confidence 低 → DEFER）: メカニズムと、条件2 実装後の scenario 8 の位置づけ
 
 条件9/10 が指す confidence 低下 → DEFER のメカニズム（`defer_low_confidence` ルールと、それを
 発火させうる confidence LLM 検出層 `confidence_llm.py` の `SemanticAmbiguityDetector`）は #112 Phase C
-で実装済みだが、`my_project/benchmark.py` の**デフォルト実行**では再現しない。これは不具合ではなく、
-ベンチマークがコスト・レイテンシ最適化のため `confidence_llm` に `NullConfidenceLLM`（常に検出なしを
-返す no-op スタブ）を注入する設計になっているため（`ANTHROPIC_API_KEY` が無くてもデフォルト実行が
-通る必要があるため）。
+で実装済み。`my_project/benchmark.py` の**デフォルト実行**はコスト・レイテンシ最適化のため
+`confidence_llm` に `NullConfidenceLLM`（常に検出なしを返す no-op スタブ）を注入する設計になっており
+（`ANTHROPIC_API_KEY` が無くてもデフォルト実行が通る必要があるため）、`--pipeline`（要
+`ANTHROPIC_API_KEY`）または `demo.py` 実行時のみ実 `SemanticAmbiguityDetector` が効く。
 
-一方、`my_project/demo.py` は `AARMRuntime` に `confidence_llm` を一切指定せず既定ファクトリ
-（実 `SemanticAmbiguityDetector`）に委ねているため、`ANTHROPIC_API_KEY` を設定して `demo.py` を実行
-すれば実 LLM 検出が効く。同様に `python my_project/benchmark.py --pipeline`（要 `ANTHROPIC_API_KEY`）
-は `pipeline_only: true` のケース（`defer_ambiguous_delete_llm_detected` 等）でのみ実 LLM 経路を通す。
+**旧シナリオ8（「古いファイルを整理して不要なものを削除してくれ」→ `delete_file(notes_2024.txt)`）は、
+条件2（`deny_intent_mismatch_destructive`、#142）実装後は confidence LLM 検出層を経由せず DENY で
+確定する。** このアクションは `action_matches_intent=false` かつ `semantic_distance≈0.456`(>0.4) で
+条件2 に該当し、DENY(900) は DEFER(700) より常に優先するため、confidence LLM 検出層が実際に何を
+検出しどれだけ confidence を減点しようと DEFER に到達する前に DENY で確定する（デフォルト実行・
+`--pipeline`・`demo.py` のいずれでも同じ。`benchmark_data.jsonl` の `deny_ambiguous_delete_intent_mismatch`
+がこの結果を検証する）。これは条件2 のコメント（#142）に明記された確定した設計判断の帰結であり、
+不具合ではない。
 
-この区別により、`benchmark_data.jsonl` の `defer_dynamic_ambiguous_delete`（シナリオ8 の再現ケース）
-は `known_regression_until: "Phase C"` のままデフォルト実行では baseline ALLOW に素通りし続けるが、
-これは「Phase C で直したはずが直っていない」のではなく「デフォルト実行が意図的にメカニズムをスタブ
-アウトしている」ことを表す。実際にシナリオ8 が LLM 検出込みで DEFER になるかは `ANTHROPIC_API_KEY` を
-持つ環境での `--pipeline` 実行または `demo.py` 実行で確認できる——#112 Phase D で実行・確認済み:
-`python my_project/benchmark.py --pipeline` で `defer_ambiguous_delete_llm_detected`（DEFER, confidence≈0.363）・
-`step_up_semantic_contradiction_copy`（STEP_UP, confidence≈0.5）がいずれも期待どおりの decision になり、
-`python my_project/demo.py` のシナリオ8 でも `delete_file` アクションが confidence 0.363 で DEFER に
-入るところまでは意図どおり確認した。ただしその先の DEFER 解決は正常に機能していない: DEFER に入った
-`delete_file` を `DeferralResolver.resolve()` が再評価して DENY を返すが、その DENY 理由は
-「`notes_2024.txt` はセッション内で既に実行済みであり重複削除は矛盾」という**誤認**である。DEFER は
-実行保留であり `delete_file` の実装（`FILES.pop`）は呼ばれておらず `notes_2024.txt` は削除されていない
-（`agent.py` の二重発火防止により発火自体も1回）。これは `DeferralResolver` が LLM に decision を
-出させる構造上、`resolve()` に渡される文脈中の「DEFER された（未実行の）アクション」を LLM が「実行済み」と
-誤読したことによる、根拠不成立の DENY である。結果の DENY がたまたま安全側に倒れていることと解決
-ロジックが正しく機能していることは別であり、シナリオ8 の DEFER 解決は「正常な自律解決の確認」には
-なっていない（DEFER 解決層の LLM decision 除去は #135 で扱う）。
+結果として、confidence LLM 検出層のうち「全体の意図の曖昧さ（`ambiguous_intent` finding）」を
+`delete_file` に対して実演する既存シナリオが失われた（`SemanticAmbiguityDetector` 自体は
+`step_up_semantic_contradiction_copy`（`copy(src,src)` の意味論的矛盾検出）で引き続き検証される。
+`copy_file` は destructive_tools にも write_file にも該当しないため条件2 の影響を受けない）。
+代替シナリオ（`action_matches_intent=false` だが `semantic_distance<=0.4` に収まる曖昧な削除意図など）
+の要否は別途検討する（#150）。
+
+なお、旧シナリオ8 が DEFER に到達していた頃（条件2 実装前、#112 Phase D 時点）に観測されていた
+`DeferralResolver` の不具合——DEFER 解決時に LLM が「DEFER された（未実行の）アクション」を
+「セッション内で既に実行済み」と誤読し、根拠不成立の DENY を返す——は、条件2 実装後は本シナリオが
+そもそも DEFER に入らなくなったため再現できなくなったが、`DeferralResolver` が LLM に decision を
+出させる構造自体は変わっていないため、他の DEFER 経路（例: `defer_low_confidence` が他要因で単独発火する
+場合）では依然として起こりうる。この構造上の不具合は解消されておらず、DEFER 解決層の LLM decision
+除去は #135 で扱う。
 
 ### δ 参照の記法: `context.<signal>` 述語オブジェクト
 
@@ -318,8 +319,8 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 現行デモは LLM の decision 判定に依存したシナリオを持つ。組み替え後（distance + ポリシー + confidence）で
 これらが再現できるかは、実装後 benchmark で確かめる:
 
-- **シナリオ4「読むだけ頼んだのにエージェントが delete_file 実行 → DENY」**: delete_file と元リクエスト（読む）の semantic distance が大きく出て、`distance > 閾値 → DENY`（条件1）で捉えられるはず。埋め込みが実際にこの距離を大きく算出するかが検証点。
-- **シナリオ8「"古いファイル"の定義が曖昧 → DEFER」**: "古い" の判断に confidence が低く出て DEFER になるはず。confidence 計算がこの曖昧さを低く算出するか（#77 の較正、および §5 の LLM 活用）が検証点。
+- **シナリオ4「読むだけ頼んだのにエージェントが delete_file 実行 → DENY」**: delete_file と元リクエスト（読む）の semantic distance が大きく出て、`action_matches_intent=false AND distance > 0.4 → DENY`（条件2、#142）で捉えられるはず。埋め込みが実際にこの距離を大きく算出するかが検証点。実装後 benchmark で確認済み（`deny_dynamic_delete_intent_mismatch`）。
+- **シナリオ8「"古いファイル"の定義が曖昧 → DEFER」**: 当初は "古い" の判断に confidence が低く出て DEFER になることを想定していたが、条件2 実装後は本シナリオも `action_matches_intent=false AND distance>0.4` に該当し、confidence を経由せず DENY で確定する（詳細は §3「条件9/10」）。DEFER を実演する想定シナリオとしては再現しない。
 - シナリオ5（PII 削除 → STEP_UP）、シナリオ7（危険パス → MODIFY）等、静的ルール・data_classification で決まるものは、LLM の decision 除去の影響を受けにくい（元々ポリシー側）。
 
 再現できない場合、その具体的な不足が、将来的な追加設計（§7）を検討する根拠になる。
@@ -355,25 +356,20 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 本メモの設計は試作段階の想定であり、実装で確認が取れているのは一部。概略:
 
 - **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains）— #112 Phase B0 で実装済み。semantic_distance・data_classification・confidence の個別ポリシールール（`deny_intent_mismatch_delete`・`step_up_pii_delete`・`step_up_low_confidence`/`defer_low_confidence`）— #112 Phase B1〜B3 で実装済み。confidence の evaluability 定義に基づく LLM 検出層（`confidence_llm.py`。`copy(src,src)` 型の意味論的矛盾・曖昧な意図の検出、fail-closed、受領書への減点幅・検出理由の記録）— #112 Phase C で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
-- **設計のみ・未実装**: 条件2（`distance > 0.4`、本番外・`delete_file` 以外への一般化）・条件14
-  （production + destructive → STEP_UP）— #112 Phase D の再検証で未実装と確定し、priority 帯の
-  割り当て設計とあわせて [#129](https://github.com/y-nakata/laarma/issues/129) に申し送り済み。
+- **設計のみ・未実装**: 条件14（production + destructive → STEP_UP）— #142 で実装予定。
+  条件2（`action_matches_intent=false AND distance > 0.4` の破壊/書込 DENY）は #142 で実装済み
+  （`deny_intent_mismatch_destructive`）。
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証。
 - **条件1〜15 の再検証完了（#112 Phase D）**: 条件1・13・15 はデフォルト benchmark 実行で確定再現
   （`deny_dynamic_delete_intent_mismatch`・`step_up_pii_delete`・`step_up_low_confidence_external_action`）。
   条件6・7・12 は明示 ALLOW ルール化の対象（#139）。「baseline ALLOW で自然に出るため専用ルール不要」という従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤り。
-  条件3・4 は既存の記述どおり（別 Issue の穴）。条件11 は廃止（#137）。条件9/10（デモシナリオ8「古いファイル」）
-  はメカニズム自体は実装済みだが、`benchmark.py` のデフォルト実行が意図的に `NullConfidenceLLM`
-  スタブを使うため `defer_dynamic_ambiguous_delete` は `known_regression_until: "Phase C"` のまま
-  素通りし続ける——詳細は §3「条件9/10: メカニズムとベンチマークのデフォルト実行の乖離」を参照。
-  実 LLM 経路（`demo.py`・`--pipeline`）での再現は `ANTHROPIC_API_KEY` を持つ環境での実行で
-  確認済み——`--pipeline` 実行で `defer_ambiguous_delete_llm_detected`・`step_up_semantic_contradiction_copy`
-  がいずれも期待どおりの decision になった。`demo.py` シナリオ8 でも `delete_file` が confidence 0.363
-  で DEFER に入ることは確認したが、その先の `DeferralResolver` による自律解決は保留中で未実行の
-  アクションを「実行済み・重複」と誤認した根拠不成立の DENY であり、正常な DEFER 解決の確認には
-  なっていない（詳細は §3「条件9/10」節末尾。DEFER 解決層の LLM decision 除去は #135 で扱う）。
-  条件2・14 は上記のとおり未実装と確定。
+  条件3・4 は既存の記述どおり（別 Issue の穴）。条件11 は廃止（#137）。条件9/10（confidence 低下 →
+  DEFER のメカニズム自体）は #112 Phase C で実装済みで `step_up_semantic_contradiction_copy`
+  （`--pipeline` 実行）で確認できるが、当初の実演シナリオだった旧デモシナリオ8「古いファイル」は
+  条件2（#142）実装後は confidence LLM 検出層に到達する前に DENY で確定するようになった——詳細は
+  §3「条件9/10: メカニズムと、条件2 実装後の scenario 8 の位置づけ」を参照。条件14 は上記のとおり
+  未実装。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、
   composite risk（#100）、priority 体系化（#129。条件2・14 の割り当てを含む）。δ 参照ポリシーは
   本リファクタ内で段階実装（旧 #107 吸収）。

@@ -167,9 +167,9 @@ confidence_level）を等しく C の一部とし、match ではそれらを `co
 分割はしない**——5つとも同格の δ なので、区画は `context` 一つで足りる。
 
 - `context.data_classification`（集合参照、`CONTAINS` 相当。論文・公式一致。回帰 `step_up_pii_delete` の回復対象）
-- `context.semantic_distance`（閾値参照 `{ gt: 0.4 }` 相当。回帰 `deny_dynamic_delete_intent_mismatch` の回復対象）
+- `context.semantic_distance`（閾値参照 `{ gt: 0.4 }` 相当。回帰 `deny_intent_mismatch_destructive` の回復対象）
 - `context.scope_expansion`（真偽/閾値参照）
-- `context.confidence_level`（閾値参照 `{ lt: 0.4 }` 相当。回帰 `defer_dynamic_ambiguous_delete` の回復対象）
+- `context.confidence_level`（閾値参照 `{ lt: 0.4 }` 相当。回帰 `deny_ambiguous_delete_intent_mismatch`（旧 `defer_dynamic_ambiguous_delete`。条件2 実装後は confidence_level に到達する前に DENY で確定する）の回復対象）
 
 ### (c) confidence を危険性区画（`risk_signals`）に入れない——別区画を作るのではなく、δ として context に置く
 

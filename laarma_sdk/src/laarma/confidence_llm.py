@@ -35,10 +35,13 @@ from ._text_sanitize import (
 # LLM は penalty の大きさを持たない（数値をハルシネートさせない）。finding の検出だけを
 # LLM に任せ、減点幅はコード側の固定定数にする。
 #
-# 0.5 という値は defer_dynamic_ambiguous_delete（#112 Phase B3 の既知回帰。実測ベースライン
-# confidence≈0.863）を policy.yaml の defer_low_confidence（confidence<=0.4）に落とすための
-# 初期較正値（0.863 - 0.5 = 0.363 <= 0.4）。他の決定論係数（_compute_confidence の 0.3/0.25/0.1）
-# と同様に暫定値であり、#77（confidence 較正）の対象。
+# 0.5 という値は deny_ambiguous_delete_intent_mismatch（旧 defer_dynamic_ambiguous_delete。
+# #112 Phase B3 の既知回帰。実測ベースライン confidence≈0.863）を policy.yaml の
+# defer_low_confidence（confidence<=0.4）に落とすための初期較正値（0.863 - 0.5 = 0.363 <= 0.4）。
+# 他の決定論係数（_compute_confidence の 0.3/0.25/0.1）と同様に暫定値であり、#77（confidence 較正）
+# の対象。なお条件2（#142）実装後、このシナリオ自体は confidence_level に到達する前に
+# deny_intent_mismatch_destructive（DENY・900）で確定するため、この値の較正根拠としての意味は
+# 保つが、benchmark 上の再現先は deny_ambiguous_delete_intent_mismatch（expected DENY）に変わった。
 _LLM_PENALTY = 0.5
 
 _FINDING_NONE = "none"

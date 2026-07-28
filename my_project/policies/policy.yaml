@@ -29,6 +29,50 @@ denied_tools:
 
 max_actions: 50
 
+# データ分類キーワード（省略するとデフォルト値を使用）
+data_classification:
+  pii_keywords:
+    - email
+    - email_address
+    - phone
+    - phone_number
+    - address
+    - ssn
+    - credit
+    - customer
+    - personal
+    - name
+    - info
+  confidential_keywords:
+    - secret
+    - token
+    - key
+    - credential
+    - private
+    - internal
+    - config
+
+# ツール分類（性質による分類。データの機密度とは別軸のため data_classification と分離。
+# 省略するとデフォルト値を使用）
+# rules: 側で &destructive_tools を参照するため、rules: より前で定義する（YAML のエイリアスは
+# 文書内で先に出現したアンカーしか解決できない）。
+tool_classification:
+  sensitive_tools:
+    - database
+    - db
+    - execute_shell
+    - execute_sql
+  destructive_tools: &destructive_tools
+    - delete_file
+    - drop_database
+    - delete_all_records
+    - execute_shell
+  external_tools:
+    - send_email
+    - http_request
+    - webhook
+    - slack_message
+
 # 静的ルール（PolicyEngine が全マッチを収集し priority で解決する）
 # 【注記】これらは AARM 仕様外のドメイン固有ルール（試作上の妥協）。
 # path パターンマッチングなどの決定論的変換を PolicyEngine に委ねている。
@@ -71,15 +115,28 @@ rules:
         - param_matches:
             path: 'database'
 
-  - id: deny_intent_mismatch_delete
+  # 条件1（write/delete への意図矛盾/無相関）の write_file 抜けの補完を、条件2 の破壊/書込への
+  # 具体化として吸収する（#142）。AND ゲート（action_matches_intent=false かつ
+  # semantic_distance>0.4）を原文どおり復元し、対象を delete_file 限定から destructive_tools/
+  # write_file へ拡張。旧 deny_intent_mismatch_delete の distance>0.64 単独条件は、AND ゲートを
+  # 落とした代償に閾値を吊り上げた歪曲値（原文にない）だったため置換する。
+  #
+  # 曖昧削除（「古いファイルを整理して不要なものを削除してくれ」等）もこの AND ゲートに該当し
+  # DENY に倒れる。これは字義どおり移植した帰結として確定した設計判断（#142）——旧ルールの
+  # distance>0.64 のもとで DEFER 期待になっていた benchmark ケースは、AND ゲートを落とした
+  # 歪曲の産物であり、変化前の期待値を維持する理由にはしない。
+  - id: deny_intent_mismatch_destructive   # 旧 deny_intent_mismatch_delete を置換
     decision: DENY
-    reason: "ユーザーの意図から乖離した削除操作 '{path}' を検出したため拒否しました。"
+    reason: "ユーザーの意図から乖離した破壊/書込操作 '{path}' を検出したため拒否しました。"
     priority: 900
     conditions:
-      tool: delete_file
+      any_of:
+        - tool: *destructive_tools
+        - tool: write_file
       context:
+        action_matches_intent: false
         semantic_distance:
-          gt: 0.64
+          gt: 0.4
 
   # 当該ファイル（現時点のアクション）が PII/CONFIDENTIAL かどうかを見る。累積 data_classification
   # ではなく current_data_classification を参照する(#143)。累積を使うと、セッション内で先に PII に
@@ -169,45 +226,3 @@ rules:
       any_of:
         - tool: read_file
         - tool: list_files
-
-# データ分類キーワード（省略するとデフォルト値を使用）
-data_classification:
-  pii_keywords:
-    - email
-    - email_address
-    - phone
-    - phone_number
-    - address
-    - ssn
-    - credit
-    - customer
-    - personal
-    - name
-    - info
-  confidential_keywords:
-    - secret
-    - token
-    - key
-    - credential
-    - private
-    - internal
-    - config
-
-# ツール分類（性質による分類。データの機密度とは別軸のため data_classification と分離。
-# 省略するとデフォルト値を使用）
-tool_classification:
-  sensitive_tools:
-    - database
-    - db
-    - execute_shell
-    - execute_sql
-  destructive_tools: &destructive_tools
-    - delete_file
-    - drop_database
-    - delete_all_records
-    - execute_shell
-  external_tools:
-    - send_email
-    - http_request
-    - webhook
-    - slack_message

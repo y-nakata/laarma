@@ -1,0 +1,12 @@
+# テスト専用フィクスチャ: conditions.tool のリストマッチ（OR）の疎通確認用（#140）。
+#
+# benchmark_data.jsonl の tool_list_match_* のみが policy_file 経由でこのファイルを
+# ロードする。配布用 my_project/policies/policy.yaml にはテスト専用ルールを混在させない。
+
+rules:
+  - id: _test_tool_list_match
+    decision: DENY
+    reason: "テスト専用: conditions.tool のリストマッチ（OR）の発火確認。"
+    priority: 5
+    conditions:
+      tool: [delete_file, drop_database]

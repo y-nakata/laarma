@@ -64,6 +64,7 @@ def load_policy(path: str | Path) -> Policy:
     ]
 
     dc = data.get("data_classification", {})
+    tc = data.get("tool_classification", {})
 
     def _frozenset_or_none(lst: list | None) -> "frozenset[str] | None":
         return frozenset(lst) if lst else None
@@ -74,7 +75,7 @@ def load_policy(path: str | Path) -> Policy:
         rules=rules,
         pii_keywords=_frozenset_or_none(dc.get("pii_keywords")),
         confidential_keywords=_frozenset_or_none(dc.get("confidential_keywords")),
-        sensitive_tools=_frozenset_or_none(dc.get("sensitive_tools")),
-        destructive_tools=_frozenset_or_none(dc.get("destructive_tools")),
-        external_tools=_frozenset_or_none(dc.get("external_tools")),
+        sensitive_tools=_frozenset_or_none(tc.get("sensitive_tools")),
+        destructive_tools=_frozenset_or_none(tc.get("destructive_tools")),
+        external_tools=_frozenset_or_none(tc.get("external_tools")),
     )

@@ -84,8 +84,13 @@ def _match_conditions(
         ):
             return False
 
-    if "tool" in conditions and action.tool_name != conditions["tool"]:
-        return False
+    if "tool" in conditions:
+        tool_condition = conditions["tool"]
+        if isinstance(tool_condition, list):
+            if action.tool_name not in tool_condition:
+                return False
+        elif action.tool_name != tool_condition:
+            return False
 
     if "environment_type" in conditions:
         if not environment or environment.environment != conditions["environment_type"]:

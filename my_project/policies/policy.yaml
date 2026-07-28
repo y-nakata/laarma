@@ -145,12 +145,16 @@ data_classification:
     - private
     - internal
     - config
+
+# ツール分類（性質による分類。データの機密度とは別軸のため data_classification と分離。
+# 省略するとデフォルト値を使用）
+tool_classification:
   sensitive_tools:
     - database
     - db
     - execute_shell
     - execute_sql
-  destructive_tools:
+  destructive_tools: &destructive_tools
     - delete_file
     - drop_database
     - delete_all_records

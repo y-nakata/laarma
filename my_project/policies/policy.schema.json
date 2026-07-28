@@ -34,8 +34,11 @@
       "additionalProperties": false,
       "properties": {
         "tool": {
-          "type": "string",
-          "description": "一致させるツール名。"
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ],
+          "description": "一致させるツール名。文字列なら完全一致、配列なら列挙ツールのいずれかに一致（OR）。"
         },
         "environment_type": {
           "type": "string",
@@ -138,7 +141,14 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "CONFIDENTIAL と見なすキーワード。"
-        },
+        }
+      }
+    },
+    "tool_classification": {
+      "type": "object",
+      "description": "ツールの性質（機密性・破壊性・外部送信性）による分類。省略するとデフォルト値を使用。",
+      "additionalProperties": false,
+      "properties": {
         "sensitive_tools": {
           "type": "array",
           "items": { "type": "string" },
@@ -147,7 +157,7 @@
         "destructive_tools": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "破壊的操作とみなすツール名。context_accumulator での分類に使用。"
+          "description": "破壊的操作とみなすツール名。ルール条件の tool 参照（conditions.tool）で意図整合性 DENY / STEP_UP ルールから参照する。"
         },
         "external_tools": {
           "type": "array",

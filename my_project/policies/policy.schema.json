@@ -59,12 +59,13 @@
           "additionalProperties": false,
           "description": "derived_signals()（δ）を参照する述語。数値シグナルは gt/gte/lt/lte/eq、集合シグナルは contains、boolean シグナルは直接値（true/false）。",
           "properties": {
-            "semantic_distance":         { "$ref": "#/definitions/numericPredicate" },
-            "confidence_level":          { "$ref": "#/definitions/numericPredicate" },
-            "data_classification":       { "$ref": "#/definitions/setPredicate" },
-            "action_matches_intent":     { "type": "boolean" },
-            "scope_expansion_detected":  { "type": "boolean" },
-            "scope_expansion_recent":    { "type": "boolean" }
+            "semantic_distance":            { "$ref": "#/definitions/numericPredicate" },
+            "confidence_level":             { "$ref": "#/definitions/numericPredicate" },
+            "data_classification":          { "$ref": "#/definitions/setPredicate" },
+            "current_data_classification":  { "$ref": "#/definitions/setPredicate" },
+            "action_matches_intent":        { "type": "boolean" },
+            "scope_expansion_detected":     { "type": "boolean" },
+            "scope_expansion_recent":       { "type": "boolean" }
           }
         },
         "any_of": {

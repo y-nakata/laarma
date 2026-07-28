@@ -19,7 +19,8 @@ PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す単�
     唯一の分類——に対応）。
   - ルール条件は `context.<signal>` で `derived_signals()`（δ）を参照できる。数値シグナル
     （semantic_distance / confidence_level）は述語オブジェクト `{演算子: 値}` で
-    gt/gte/lt/lte/eq、集合シグナル（data_classification）は `{contains: 値}` を使う。
+    gt/gte/lt/lte/eq、集合シグナル（data_classification=セッション累積 /
+    current_data_classification=当該アクション時点のみ）は `{contains: 値}` を使う。
     boolean シグナル（action_matches_intent / scope_expansion_detected /
     scope_expansion_recent）は演算子オブジェクトでなく直接値（`action_matches_intent: false`）
     で書く（`eq` 一択で演算子の明示が無意味なため）。

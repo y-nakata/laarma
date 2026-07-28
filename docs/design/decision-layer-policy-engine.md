@@ -106,14 +106,15 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
 | 600 | STEP_UP | | `step_up_pii_delete` / `step_up_sensitive_read` / `step_up_low_confidence` |
 | 500 | MODIFY | | `unsafe_write_path` |
-| 100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用） | `allow_information_gathering` |
+| 140〜100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用） | `allow_information_gathering`(130) |
 | 0 | baseline | priority 無指定の既定値 | |
 
 - **Forbidden(1000)**: `environment_type`（静的環境で AARM の C ではない）と path（`action.param`）のみ参照する δ 非参照の静的 DENY なので、Forbidden 帯の定義に合致する。
 - **意図整合性 DENY(900) が STEP_UP(600)・MODIFY(500) を覆す**。距離大の PII 削除で DENY と STEP_UP が同値 priority 100 だったバグ（#129 issuecomment-4971920088）を帯分離で解消。意図逸脱な write が MODIFY で黙って basename 化される「変換を伴った fail-open」も 900 > 500 で回避される。
 - **DEFER 帯を 710/700 に分ける**のは、`production_delete_defer`（特定状況に限定）を `defer_low_confidence`（包括土台）より上に置き、どちらの reason を出すかを priority で明示するため（YAML 記述順という別軸に依存させない）。両者は同時発火しても両方 DEFER なので competition しない。
-- **帯は幅を持つ**（例: 700 番台）。帯どうしの順序が骨格で、帯内の刻みは詳細化の表現。
-- **800（文脈依存 DENY）と 100（ctx-ALLOW）は現状該当ルールなしの予約帯**。
+- **ctx-ALLOW 帯(100番台)も同様に細分化する**（#142 パス2 総点検）。より具体的で情報量の多い許可理由が優先して出るよう並べる: 140=`allow_destructive_explicit_high_confidence`（条件8）/ 130=`allow_action_matches_intent`（条件5）・`allow_information_gathering`（条件12前半）/ 120=`allow_low_semantic_distance`（条件6）/ 110=`allow_no_sensitive_data`（条件7）。条件7「PII/CONFIDENTIAL を含まない」はほぼ全アクションにマッチする最も消極的な理由のため最下位に置く。条件5〜8 のうち実装済みは条件12前半のみ（#142）。
+- **帯は幅を持つ**（例: 700 番台・100 番台）。帯どうしの順序が骨格で、帯内の刻みは詳細化の表現。
+- **800（文脈依存 DENY）は現状該当ルールなしの予約帯**。
 - 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に載る予定。両条件の新規実装は #142 で詰めて本表に反映する。
 
 ---

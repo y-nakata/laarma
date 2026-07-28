@@ -196,8 +196,15 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 | `context.semantic_distance` | `semantic_distance` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
 | `context.confidence_level` | `confidence_level` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
 | `context.data_classification` | `data_classification` | 集合（sorted set） | `contains` |
+| `context.action_matches_intent` | `action_matches_intent` | boolean | 直接値（`true`/`false`。`eq` 一択のため演算子オブジェクトは使わない） |
+| `context.scope_expansion_detected` | `scope_expansion_detected` | boolean | 直接値 |
+| `context.scope_expansion_recent` | `scope_expansion_recent` | boolean | 直接値 |
 
-`scope_expansion` の参照は、scope_expansion の intent 側 LLM 判定（#99）が完了してから追加する。
+`derived_signals()` が返す残り（`entity_set` / `confidence_llm_penalty` / `confidence_llm_detail`）は、
+参照するルールの当てがつくまで開放しない（#140 のアンカー YAGNI と同じ判断軸、#141）。
+
+`scope_expansion_detected` / `scope_expansion_recent` は参照可能だが、値そのものの精度（scope_expansion の
+intent 側 LLM 判定が未完了、#99）はこの表の範囲外——「引けるかどうか」と「信号の意味論が十分か」は別軸。
 
 未参照の context を DEFER トリガーにする R3(a)（CONFORMANCE 章、次節参照）は実装しない。laarma は
 δ を評価前に必ず算出してから policy 評価に渡す同期モデルであり、`derived_signals()` は履歴が無い

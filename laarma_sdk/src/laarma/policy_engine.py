@@ -17,9 +17,12 @@ PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す単�
   - denied_tools / privilege_scope は `rules` の priority システムの外側にある独立した
     事前チェックとして扱う（R3/Table I の Forbidden 分類——コンテキスト評価が完全に無視される
     唯一の分類——に対応）。
-  - ルール条件は `context.<signal>` で `derived_signals()`（δ）を参照できる。値は述語オブジェクト
-    `{演算子: 値}` で指定し、数値シグナル（semantic_distance / confidence_level）は
-    gt/gte/lt/lte/eq、集合シグナル（data_classification）は contains を使う。
+  - ルール条件は `context.<signal>` で `derived_signals()`（δ）を参照できる。数値シグナル
+    （semantic_distance / confidence_level）は述語オブジェクト `{演算子: 値}` で
+    gt/gte/lt/lte/eq、集合シグナル（data_classification）は `{contains: 値}` を使う。
+    boolean シグナル（action_matches_intent / scope_expansion_detected /
+    scope_expansion_recent）は演算子オブジェクトでなく直接値（`action_matches_intent: false`）
+    で書く（`eq` 一択で演算子の明示が無意味なため）。
     R3(a)（未 populate な context 参照 → DEFER）は実装しない。laarma の同期モデルでは δ は
     評価前に必ず算出され「未 populate」が生じないため（derived_signals() は常にデフォルト値で
     埋まる）。
@@ -44,13 +47,20 @@ _NUMERIC_PREDICATE_OPS: dict[str, Callable[[float, float], bool]] = {
 }
 
 
-def _match_context_predicate(value: Any, predicate: dict) -> bool:
-    """derived_signals() の1シグナル値が述語オブジェクトに一致するか判定する。
+def _match_context_predicate(value: Any, predicate: dict | bool) -> bool:
+    """derived_signals() の1シグナル値が述語に一致するか判定する。
+
+    boolean シグナル（例: action_matches_intent）は演算子オブジェクトでなく直接値で
+    記述する（`eq` 一択で演算子の明示が無意味なため）。predicate が dict でなければ
+    等値比較で判定する。
 
     複数演算子キーを持つ predicate は AND 評価（例: {"gt": 0.3, "lt": 0.9} で範囲指定）。
     未参照・デフォルト値の区別は行わない（R3(a) 非実装。#112 Phase B0）ため、value が
     None または空集合の場合は「安全側 = 不一致」として false を返す。
     """
+    if not isinstance(predicate, dict):
+        return value == predicate
+
     for op, operand in predicate.items():
         if op == "contains":
             if operand not in (value or []):

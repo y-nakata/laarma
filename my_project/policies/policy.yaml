@@ -99,6 +99,24 @@ rules:
             current_data_classification:
               contains: CONFIDENTIAL
 
+  # 機微データ（PII/CONFIDENTIAL）への read を STEP_UP する（条件13「significant access」側、#142）。
+  # list_files は含めない（ディレクトリ一覧は PUBLIC）。action_matches_intent は条件に書かない
+  # （原文 "even with explicit user intent" — 明示意図があっても STEP_UP。意図一致は ALLOW 帯(100)
+  # の allow_information_gathering 等を発火させうるが、本ルールが STEP_UP 帯(600)で上回る）。
+  - id: step_up_sensitive_read
+    decision: STEP_UP
+    priority: 600
+    reason: "機微データを含む可能性のあるファイル '{path}' の読み出しには追加確認が必要です。"
+    conditions:
+      tool: read_file
+      any_of:
+        - context:
+            current_data_classification:
+              contains: PII
+        - context:
+            current_data_classification:
+              contains: CONFIDENTIAL
+
   # confidence_level（evaluability）参照ルール（条件10・15の移行、#112 Phase B3・Phase C）。
   # ツール限定はしない（confidence は distance と異なり危険性軸ではなく評価可能性の軸のため、
   # 破壊的操作に絞る理由がない）。priority は帯（#129）に従い、defer_low_confidence=700（DEFER 帯）・

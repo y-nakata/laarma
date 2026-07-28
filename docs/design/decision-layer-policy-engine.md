@@ -104,7 +104,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 800 | DENY | 文脈依存 DENY（組織固有 DENY 用に予約） | （なし） |
 | 710 | DEFER | カスタム DEFER の詳細化・穴あけ | `production_delete_defer` |
 | 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
-| 600 | STEP_UP | | `step_up_pii_delete` / `step_up_low_confidence` |
+| 600 | STEP_UP | | `step_up_pii_delete` / `step_up_sensitive_read` / `step_up_low_confidence` |
 | 500 | MODIFY | | `unsafe_write_path` |
 | 100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用に予約） | （なし） |
 | 0 | baseline | priority 無指定の既定値 | |
@@ -143,7 +143,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 | 10 | DEFER | `confidence < 0.4` かつ追加 context で解決可能 | **新規ルール不要**（**#137**）。既存 `defer_low_confidence`（DEFER・700）が前半のみを条件にしており結果的に正しい形。後半「追加 context で解決可能」は出口条件なので入口に書かない |
 | 11 | DEFER | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ になく、実装に落とせる具体性を持たない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもの |
 | 12 | DEFER 節 | 情報収集系は曖昧でも ALLOW（後半: 介入点は risk が materialize する破壊/書込） | DEFER の起因ではないため DEFER 区分としては射程外。前半は `allow_information_gathering`（ALLOW・ctx-ALLOW 帯）として明示 ALLOW ルール化（`read_file`/`list_files`）。後半の原則は **#128** に係属 |
-| 13 | STEP_UP | PII/CONFIDENTIAL の削除**または重大アクセス** | deletion 側は `step_up_pii_delete`（STEP_UP・600）。当該ファイル（現時点のアクション）の機微性を見る `context.current_data_classification` を参照し PII/CONFIDENTIAL の両方を拾う（累積 `data_classification` との取り違えと CONFIDENTIAL の抜けを是正、**#143**）。significant access（機微データの read）は**未実装**で `step_up_sensitive_read` を新規追加する。`list_files` は含めない（ディレクトリ一覧は PUBLIC） |
+| 13 | STEP_UP | PII/CONFIDENTIAL の削除**または重大アクセス** | deletion 側は `step_up_pii_delete`（STEP_UP・600）。significant access（機微データの read）側は `step_up_sensitive_read`（STEP_UP・600、`read_file` のみ・`list_files` は含めない）。いずれも当該ファイル（現時点のアクション）の機微性を見る `context.current_data_classification` を参照し PII/CONFIDENTIAL の両方を拾う（累積 `data_classification` との取り違えと CONFIDENTIAL の抜けを是正、**#143**）。`action_matches_intent` は条件に書かない（原文 "even with explicit user intent" — 明示意図があっても STEP_UP。ALLOW 帯(100)より STEP_UP 帯(600)が優先されることで表現する） |
 | 14 | STEP_UP | 本番の高影響操作 | `step_up_production_destructive`（STEP_UP・600）。**未実装**。本番かつメンテナンス窓内かつ重要ファイル以外という、既存2ルール（`deny_critical_file_delete_in_prod`・`production_delete_defer`）が覆っていない領域を埋める |
 | 15 | STEP_UP | `confidence 0.4-0.6` かつ中程度リスク | **新規ルール不要**。既存 `step_up_low_confidence`（STEP_UP・600）が正しい形。`with moderate risk` は条件に書かない（危険性は evaluability の軸である confidence に混ぜない——§5） |
 

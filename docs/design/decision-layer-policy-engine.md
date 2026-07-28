@@ -91,33 +91,63 @@ decision を出す LLM 判定（現行 IntentAlignment）は除去する。**
 
 MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしないよう配慮したのは、提案/上書きモデルで「MODIFY 提案 → その後 LLM が意図整合性を見て上書き」しうる構造だったため、MODIFY で確定すると意図整合性チェックを飛ばす懸念があったからである。priority エンジン化で順序が「後で上書き」から「高 priority ルールが先に勝つ」へ反転するため、意図整合性を担う δ 参照ルールを MODIFY より高 priority に配置すれば、MODIFY が terminal でも素通りしない。これは強制パスではなく priority 配置の規律であり、δ 参照ルールの実装（Phase B）で担保する。
 
+### priority 帯の確定（#129）
+
+決定層の priority 解決（本節）に用いる priority を、安全序列 DENY > DEFER > STEP_UP > MODIFY > ALLOW を priority の大小に対応させた帯に確定する（#129、commit dcc67b6 で `policy.yaml` に反映済み）。
+
+異なる decision は異なる帯に置く。`_resolve_priority()` は同一 priority で decision が割れると R3(b) の competition として terminal DEFER に落とすため、decision ごとに帯を分けることで、上位の決定が競合ではなく priority で正しく勝つ。
+
+| priority | 決定 | 帯の意味 | 現存ルール |
+|---|---|---|---|
+| 1000 | DENY | Forbidden（δ 非参照の静的 DENY・不可侵最上位） | `deny_critical_file_delete_in_prod` |
+| 900 | DENY | 意図整合性 DENY（`semantic_distance` 参照） | `deny_intent_mismatch_delete` |
+| 800 | DENY | 文脈依存 DENY（組織固有 DENY 用に予約） | （なし） |
+| 710 | DEFER | カスタム DEFER の詳細化・穴あけ | `production_delete_defer` |
+| 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
+| 600 | STEP_UP | | `step_up_pii_delete` / `step_up_low_confidence` |
+| 500 | MODIFY | | `unsafe_write_path` |
+| 100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用に予約） | （なし） |
+| 0 | baseline | priority 無指定の既定値 | |
+
+- **Forbidden(1000)**: `environment_type`（静的環境で AARM の C ではない）と path（`action.param`）のみ参照する δ 非参照の静的 DENY なので、Forbidden 帯の定義に合致する。
+- **意図整合性 DENY(900) が STEP_UP(600)・MODIFY(500) を覆す**。距離大の PII 削除で DENY と STEP_UP が同値 priority 100 だったバグ（#129 issuecomment-4971920088）を帯分離で解消。意図逸脱な write が MODIFY で黙って basename 化される「変換を伴った fail-open」も 900 > 500 で回避される。
+- **DEFER 帯を 710/700 に分ける**のは、`production_delete_defer`（特定状況に限定）を `defer_low_confidence`（包括土台）より上に置き、どちらの reason を出すかを priority で明示するため（YAML 記述順という別軸に依存させない）。両者は同時発火しても両方 DEFER なので competition しない。
+- **帯は幅を持つ**（例: 700 番台）。帯どうしの順序が骨格で、帯内の刻みは詳細化の表現。
+- **800（文脈依存 DENY）と 100（ctx-ALLOW）は現状該当ルールなしの予約帯**。
+- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に載る予定。両条件の新規実装は #142 で詰めて本表に反映する。
+
 ---
 
 ## 3. 現行 IntentAlignment の判定基準（条件1〜15）の移行先
 
-現行 `intent_alignment.py` の SYSTEM_PROMPT は、Decision Criteria として 15 個の判定基準を持つ
-（#94 で条件1〜15 として列挙済み）。組み替えでは、これらを LLM の decision 判定から、δ のポリシー参照・
-別 Issue・confidence（§5）に分解する。以下は棚卸しの結果で、実装・benchmark で再検証して訂正しうる。
+現行 `intent_alignment.py` の SYSTEM_PROMPT は、Decision Criteria として DENY 4項目・ALLOW 4項目・
+DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替えでは、これらを LLM の decision 判定から、
+ポリシールール・別 Issue・廃止に分解する。
 
-| 条件 | 現行の判定内容 | 移行先 |
-|---|---|---|
-| 1 | action が意図と矛盾/無相関（読めと言われ write/delete） | semantic distance のポリシー閾値参照（`semantic_distance > 閾値 → DENY`）。**実装済み・再現確認済み**（#112 Phase D）: `deny_intent_mismatch_delete`（`tool: delete_file`, `semantic_distance > 0.64`）。`benchmark_data.jsonl` の `deny_dynamic_delete_intent_mismatch`（デフォルト実行、`known_regression_until` なし）で確定再現する。 |
-| 2 | action_matches_intent=false かつ distance>0.4 で破壊/書込 | distance + tool risk のポリシー参照。**未実装**（#112 Phase D で確認）: `distance > 0.4` を参照するルールはどこにも無い。唯一の distance 参照 DENY ルールは `deny_intent_mismatch_delete` の `0.64`（`delete_file` 限定）で、条件2 が言う `0.4` は宙に浮いている。本番+`delete_file` に限定した `0.4〜0.64` 帯の扱い（条件14 の STEP_UP 化）と合わせて **#129**（ルール priority の一貫した体系化）に申し送り済み。本番外・`delete_file` 以外の破壊/書込ツールへの一般化も未着手。 |
-| 3 | scope_expansion 検出かつ意図に正当化なし | **#99**（scope_expansion 産出の再設計）に委ねる既知の穴 |
-| 4 | Compositional Risk（アクション系列が攻撃ベクトル） | **#100**（composite risk）。危険性軸の拡張。FRAMEWORK 章では DEFER に値する状況の一つとして挙がるが、実装に下ろすと DEFER として拾えず DENY／#100 に振り分けられる（§4） |
-| 5 | action_matches_intent=true / 意図が対象を明示 | 明示 ALLOW ルール化の対象（**#139**）。「distance 小 + 危険信号なし → ALLOW baseline で自然に出る」は #139 の3点（非重複無検証・明示性の喪失・将来衝突の非検知）で誤り。#139 で明示ルール化する。 |
-| 6 | semantic_distance < 0.3 | 明示 ALLOW ルール化の対象（**#139**）。「専用ルールは無く baseline ALLOW で自然に出るため不要」という従前の記述は、非重複が無検証・明示性の喪失・将来のルール追加との衝突非検知の3点で誤り。#139 で明示ルール化する。 |
-| 7 | PII/CONFIDENTIAL を含まない | 明示 ALLOW ルール化の対象（**#139**）。「`data_classification` 参照ルールが不発火なら baseline ALLOW で自然に出るため不要」という従前の記述は #139 の3点で誤り。#139 で明示ルール化する。 |
-| 8 | 破壊的でも明示意図と高 confidence | distance 小 + confidence 高のポリシー参照。既に「ポリシー参照」と書かれ明示ルール寄りだが、#129 issuecomment-4971920088 が条件5,6,7,12 と同型に挙げているため、実際に明示ルールになっているか **#139** で点検する。 |
-| 9 | 意図が曖昧でエージェントが未認可の自律判断 | confidence（evaluability）低 → DEFER。中身の解釈は #89、較正は #77（§4, §5）。**メカニズムは実装済み（#112 Phase C）だが、`benchmark.py` のデフォルト実行では再現しない**（次項および検証状況を参照）。 |
-| 10 | confidence < 0.4 かつ追加 context で解決可能 | DEFER トリガー (c)（`confidence ≤ 0.4 → DEFER`。境界 0.4 は条件15 の `0.4 < confidence < 0.6` と接続し、0.4 ちょうどが両条件の間で未発火にならないようにする）。ルール自体（`defer_low_confidence`）は実装済みだが、**デフォルト実行では発火しない**（次項参照）。 |
-| 11 | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ に無く、実装に落とせる具体性を持たない。「認可されれば安全＝認可の欠落で保留」は DEFER の入口に解決可能性を課す形で、R3(a)(b)(c) のいずれでもない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもので、認可の欠落と評価可能性の低さは別軸。 |
-| 12 | 情報収集系（read/list）は曖昧でも ALLOW | 明示 ALLOW ルール化の対象（**#139**）。「distance 小 + 非破壊 → ALLOW baseline で自然に出るため不要」という従前の記述は #139 の3点で誤り（かつ情報収集の distance は小さくない実測がある——本 Issue #128 参照）。後半原則「介入点は risk が materialize する破壊/書込アクション」の扱いは #128 に係属。 |
-| 13 | PII/CONFIDENTIAL の削除/重大アクセス | data_classification + destructive のポリシー参照 → STEP_UP（危険性軸の SDK 固定写像）。**実装済み**: `step_up_pii_delete`。`benchmark_data.jsonl` の `step_up_pii_delete` ケースで確定再現する。 |
-| 14 | 本番の高影響操作 | environment=production + destructive のポリシー参照 → STEP_UP（危険性軸の SDK 固定写像）。**未実装**（#112 Phase D で確認）: `policy.yaml` の本番 delete ルールは `deny_critical_file_delete_in_prod`（DENY・重要ファイル）と `production_delete_defer`（DEFER・その他）のみで、STEP_UP を出すルールが無い。条件13 と同型の危険性軸 SDK 固定写像でありながら Phase B の段階実装から漏れた項目。`production_delete_defer` は README シナリオ6「DEFER → DeferralResolver 自律解決」の実演でもあるため温存し、STEP_UP をどう priority で挟むかは条件2 の `0.4〜0.64` 帯と合わせて **#129** に申し送り済み。 |
-| 15 | confidence 0.4-0.6 かつ中程度リスク | confidence のポリシー参照（`0.4 < confidence < 0.6 → STEP_UP`）。**実装済み・再現確認済み**: `step_up_low_confidence`。`benchmark_data.jsonl` の `step_up_low_confidence_external_action`（デフォルト実行、決定論のみで発火）で確定再現する。 |
+以下は原文（`git show c8160f1^:laarma_sdk/src/laarma/intent_alignment.py` の SYSTEM_PROMPT）に照らした
+棚卸しの結果である。従前の記述は原文を要約で丸め、判定結果の区分を落とし、条件2 の AND ゲートを距離単独に
+潰す等の歪みがあったため作り直した（棚卸しの経緯と各条件の詳細な検討は #142）。実装・benchmark で
+再検証して訂正しうる。
 
-移行先はおおむね次に分かれる: (1) δ のポリシー閾値/集合参照で代替（条件 1,2,8,10,13,14,15。条件8 は明示ルール化済みか #139 で点検。δ 参照は本リファクタ内で段階実装）、(2) 別 Issue の穴（条件 3=#99、条件 4=#100）、(3) confidence（evaluability）低 → DEFER（条件 9）、(4) 明示 ALLOW ルール化（条件 5,6,7,12。#139）。条件11 は廃止（#137）。
+| 条件 | 区分 | 原文（要旨） | 移行先 |
+|---|---|---|---|
+| 1 | DENY | 意図と矛盾/無相関（読めと言われ write/delete） | 単一の δ 信号に写像しない（`action_matches_intent` より広い意味論的判断のため）。独立した包括 DENY ルールは作らず、意味論的整合の判断は整合信号（**#128**）に委ねる。原文が write/delete 両方をカバーする点（既存ルールの `write_file` 抜け）は条件2 のルールで補完 |
+| 2 | DENY | `action_matches_intent=false` **かつ** `semantic_distance>0.4` の破壊/書込 | `deny_intent_mismatch_destructive`（DENY・900）。既存 `deny_intent_mismatch_delete` を置換。既存の `distance>0.64` 単独条件は、AND ゲートを落とした代償に閾値を吊り上げた近似で原文にない値のため、0.4 に戻して `action_matches_intent=false` との AND を復元し、`write_file`/destructive 群へ拡張する |
+| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。`scope_expansion_detected` の産出が不完全なため暫定移植（本格対応は **#99**） |
+| 4 | DENY | Compositional Risk（アクション系列が攻撃ベクトル） | **移植対象外**。判定する信号が δ になく決定論ルールに落ちない。将来対応は **#100**（危険性軸の拡張）。FRAMEWORK 章の DEFER 記述と重なるが、帰属先は DEFER でなく危険性軸（§4） |
+| 5 | ALLOW | `action_matches_intent=true` または要求が対象を明示 | `allow_action_matches_intent`（ALLOW・ctx-ALLOW 帯）。原文の OR 後半は `action_matches_intent` の定義そのものなので前半に吸収 |
+| 6 | ALLOW | `semantic_distance < 0.3` | `allow_low_semantic_distance`（ALLOW・ctx-ALLOW 帯）。条件2 の `>0.4` との間の 0.3〜0.4 は明示基準なしで空ける（原設計も同帯に基準を持たない） |
+| 7 | ALLOW | PII/CONFIDENTIAL を含まない | `allow_no_sensitive_data`（ALLOW・ctx-ALLOW 帯）。「含まない」は `none_of` で表現し、集合述語の否定形は新設しない |
+| 8 | ALLOW | 破壊的でも明示意図と高 confidence | `allow_destructive_explicit_high_confidence`（ALLOW・ctx-ALLOW 帯）。条件5 の部分集合だが「条件5 が拾うから不要」は #139 が退けた baseline 論法と同型のため、独自ルールとして起こす |
+| 9 | DEFER | 意図が曖昧で未認可の自律判断 | **処遇不要**（**#137**）。「未認可の自律判断」は R3(a)(b)(c) のいずれでもなく入口条件にならない。ケース自体は confidence 低下（(c)）経由で成立済み |
+| 10 | DEFER | `confidence < 0.4` かつ追加 context で解決可能 | **新規ルール不要**（**#137**）。既存 `defer_low_confidence`（DEFER・700）が前半のみを条件にしており結果的に正しい形。後半「追加 context で解決可能」は出口条件なので入口に書かない |
+| 11 | DEFER | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ になく、実装に落とせる具体性を持たない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもの |
+| 12 | DEFER 節 | 情報収集系は曖昧でも ALLOW（後半: 介入点は risk が materialize する破壊/書込） | DEFER の起因ではないため DEFER 区分としては射程外。前半は `allow_information_gathering`（ALLOW・ctx-ALLOW 帯）として明示 ALLOW ルール化（`read_file`/`list_files`）。後半の原則は **#128** に係属 |
+| 13 | STEP_UP | PII/CONFIDENTIAL の削除**または重大アクセス** | deletion 側は既存 `step_up_pii_delete`（STEP_UP・600）。significant access（機微データの read）は**未実装**で `step_up_sensitive_read` を新規追加する。`list_files` は含めない（ディレクトリ一覧は PUBLIC）。既存ルールが累積 `data_classification` を当該ファイルの機微性と取り違えている件と CONFIDENTIAL の抜けは **#143** |
+| 14 | STEP_UP | 本番の高影響操作 | `step_up_production_destructive`（STEP_UP・600）。**未実装**。本番かつメンテナンス窓内かつ重要ファイル以外という、既存2ルール（`deny_critical_file_delete_in_prod`・`production_delete_defer`）が覆っていない領域を埋める |
+| 15 | STEP_UP | `confidence 0.4-0.6` かつ中程度リスク | **新規ルール不要**。既存 `step_up_low_confidence`（STEP_UP・600）が正しい形。`with moderate risk` は条件に書かない（危険性は evaluability の軸である confidence に混ぜない——§5） |
+
+移行先はおおむね次に分かれる: (1) δ・tool・環境を参照するポリシールール（条件 2,3,5,6,7,8,12前半,13,14,15）、(2) 別 Issue に委ねる（条件1=#128、条件4=#100）、(3) 既存ルールが既に正しい形で新規不要（条件10,15）、(4) 処遇不要・廃止（条件9,11=#137）。各条件の詳細な検討（ルール文案・他ルールとの非重複検証・実装順の制約）は #142。
 
 ### 条件9/10（confidence 低 → DEFER）: メカニズムとベンチマークのデフォルト実行の乖離
 

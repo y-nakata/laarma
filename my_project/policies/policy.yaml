@@ -255,3 +255,65 @@ rules:
       any_of:
         - tool: read_file
         - tool: list_files
+
+  # 条件5〜8（ALLOW、#142）。#139 で「baseline ALLOW で自然に出るから専用ルール不要」という判断を
+  # 明示的に退けたため、baseline と同じ decision（ALLOW）でも意図された許可として明示ルール化する
+  # （非重複の検証・監査可能性・将来のルール追加との衝突検知が baseline のままでは得られない）。
+  # priority は 100番台の細分化（140/130/120/110）で、より具体的で情報量の多い許可理由が優先して
+  # 出るよう並べる。いずれも ctx-ALLOW 帯のため、上位の DENY/DEFER/STEP_UP/MODIFY を握り潰す
+  # fail-open にはならない。
+
+  # 条件8: destructive かつ明示意図かつ高 confidence。条件5 の部分集合だが、「条件5に吸収されるから
+  # 不要」は #139 が退けた baseline 論法と同型のため独自ルールとして起こす。gte:0.6 は
+  # step_up_low_confidence（0.4<confidence<0.6）の上に接続する暫定閾値。
+  - id: allow_destructive_explicit_high_confidence
+    decision: ALLOW
+    priority: 140
+    reason: "破壊的操作だが、明示的な意図と高い確信度があるため許可します。"
+    conditions:
+      tool: *destructive_tools
+      context:
+        action_matches_intent: true
+        confidence_level:
+          gte: 0.6
+
+  # 条件5: 意図一致（原文の OR 後半「要求が対象を明示的に言及」は action_matches_intent の定義
+  # そのものなので前半に吸収）。
+  - id: allow_action_matches_intent
+    decision: ALLOW
+    priority: 130
+    reason: "アクションがユーザーの意図に合致しているため許可します。"
+    conditions:
+      context:
+        action_matches_intent: true
+
+  # 条件6: 意味的距離が小さい。条件2（distance>0.4 の DENY）との間の 0.3〜0.4 は明示基準なしで
+  # 空ける（原設計もこの帯に基準を持たない。閾値の是非は条件2／整合信号 #128 側の論点）。
+  - id: allow_low_semantic_distance
+    decision: ALLOW
+    priority: 120
+    reason: "アクションとユーザー意図の意味的距離が小さいため許可します。"
+    conditions:
+      context:
+        semantic_distance:
+          lt: 0.3
+
+  # 条件7: 当該アクションが機微データ（PII/CONFIDENTIAL）を扱わない。原文 "in the action" に従い
+  # current_data_classification（当該アクション時点のみ）を参照する。累積 data_classification では
+  # ない——#143 の判断軸（当該アクションの性質を見るルールには current_、セッションを跨ぐ文脈には
+  # 累積）を踏襲する。current_ を使うことで、条件13（step_up_pii_delete/step_up_sensitive_read、
+  # 同じく current_data_classification 参照）と論理的に相補になる（条件13 が発火しないケースを
+  # 条件7 が拾う）。reason は当該アクション限定の表現にする（セッション全体で機微データ不関与、と
+  # 誤読されないように。#143 で問題視した「reason が主張する判定根拠と実態の食い違い」を繰り返さない）。
+  - id: allow_no_sensitive_data
+    decision: ALLOW
+    priority: 110
+    reason: "このアクションは機微データ（PII/CONFIDENTIAL）を扱わないため許可します。"
+    conditions:
+      none_of:
+        - context:
+            current_data_classification:
+              contains: PII
+        - context:
+            current_data_classification:
+              contains: CONFIDENTIAL

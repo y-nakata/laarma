@@ -153,6 +153,20 @@ rules:
         scope_expansion_detected: true
         action_matches_intent: false
 
+  # 本番環境での破壊的操作を STEP_UP する（条件14、#142）。「十分な文脈はあるが残余リスクがある」
+  # （原文 with sufficient context but remaining risk）は DEFER でなく STEP_UP を選ぶ理由の説明であり
+  # 条件には書かない。本番の delete_file は既に2ルールが覆っている
+  # （重要ファイル→ deny_critical_file_delete_in_prod(DENY・1000)、メンテ窓外→
+  # production_delete_defer(DEFER・710)）ため、本ルールが実際に効くのは「本番かつメンテナンス窓内
+  # かつ重要ファイル以外」の領域——従来は素通り（baseline ALLOW）だった穴を埋める。
+  - id: step_up_production_destructive
+    decision: STEP_UP
+    priority: 600
+    reason: "本番環境での破壊的操作 '{path}' には追加確認が必要です。"
+    conditions:
+      tool: *destructive_tools
+      environment_type: production
+
   # 当該ファイル（現時点のアクション）が PII/CONFIDENTIAL かどうかを見る。累積 data_classification
   # ではなく current_data_classification を参照する(#143)。累積を使うと、セッション内で先に PII に
   # 触れた後は PII と無関係なファイルの削除にも STEP_UP してしまう（reason が主張する判定根拠と

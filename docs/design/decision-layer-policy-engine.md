@@ -104,7 +104,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | 800 | DENY | 文脈依存 DENY（組織固有 DENY 用に予約） | （なし） |
 | 710 | DEFER | カスタム DEFER の詳細化・穴あけ | `production_delete_defer` |
 | 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
-| 600 | STEP_UP | | `step_up_pii_delete` / `step_up_sensitive_read` / `step_up_low_confidence` |
+| 600 | STEP_UP | | `step_up_production_destructive` / `step_up_pii_delete` / `step_up_sensitive_read` / `step_up_low_confidence` |
 | 500 | MODIFY | | `unsafe_write_path` |
 | 140〜100 | ALLOW | ctx-ALLOW（#139 の明示 ALLOW ルール用） | `allow_information_gathering`(130) |
 | 0 | baseline | priority 無指定の既定値 | |
@@ -115,7 +115,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 - **ctx-ALLOW 帯(100番台)も同様に細分化する**（#142 パス2 総点検）。より具体的で情報量の多い許可理由が優先して出るよう並べる: 140=`allow_destructive_explicit_high_confidence`（条件8）/ 130=`allow_action_matches_intent`（条件5）・`allow_information_gathering`（条件12前半）/ 120=`allow_low_semantic_distance`（条件6）/ 110=`allow_no_sensitive_data`（条件7）。条件7「PII/CONFIDENTIAL を含まない」はほぼ全アクションにマッチする最も消極的な理由のため最下位に置く。条件5〜8 のうち実装済みは条件12前半のみ（#142）。
 - **帯は幅を持つ**（例: 700 番台・100 番台）。帯どうしの順序が骨格で、帯内の刻みは詳細化の表現。
 - **800（文脈依存 DENY）は現状該当ルールなしの予約帯**。
-- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に載る予定。両条件の新規実装は #142 で詰めて本表に反映する。
+- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）・条件3（`scope_expansion_detected` かつ `action_matches_intent=false` の DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に実装済み（いずれも #142）。
 
 ---
 
@@ -145,7 +145,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 | 11 | DEFER | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ になく、実装に落とせる具体性を持たない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもの |
 | 12 | DEFER 節 | 情報収集系は曖昧でも ALLOW（後半: 介入点は risk が materialize する破壊/書込） | DEFER の起因ではないため DEFER 区分としては射程外。前半は `allow_information_gathering`（ALLOW・ctx-ALLOW 帯）として明示 ALLOW ルール化（`read_file`/`list_files`）。後半の原則は **#128** に係属 |
 | 13 | STEP_UP | PII/CONFIDENTIAL の削除**または重大アクセス** | deletion 側は `step_up_pii_delete`（STEP_UP・600）。significant access（機微データの read）側は `step_up_sensitive_read`（STEP_UP・600、`read_file` のみ・`list_files` は含めない）。いずれも当該ファイル（現時点のアクション）の機微性を見る `context.current_data_classification` を参照し PII/CONFIDENTIAL の両方を拾う（累積 `data_classification` との取り違えと CONFIDENTIAL の抜けを是正、**#143**）。`action_matches_intent` は条件に書かない（原文 "even with explicit user intent" — 明示意図があっても STEP_UP。ALLOW 帯(100)より STEP_UP 帯(600)が優先されることで表現する） |
-| 14 | STEP_UP | 本番の高影響操作 | `step_up_production_destructive`（STEP_UP・600）。**未実装**。本番かつメンテナンス窓内かつ重要ファイル以外という、既存2ルール（`deny_critical_file_delete_in_prod`・`production_delete_defer`）が覆っていない領域を埋める |
+| 14 | STEP_UP | 本番の高影響操作 | `step_up_production_destructive`（STEP_UP・600）。本番かつメンテナンス窓内かつ重要ファイル以外という、既存2ルール（`deny_critical_file_delete_in_prod`・`production_delete_defer`）が覆っていない領域を埋める |
 | 15 | STEP_UP | `confidence 0.4-0.6` かつ中程度リスク | **新規ルール不要**。既存 `step_up_low_confidence`（STEP_UP・600）が正しい形。`with moderate risk` は条件に書かない（危険性は evaluability の軸である confidence に混ぜない——§5） |
 
 移行先はおおむね次に分かれる: (1) δ・tool・環境を参照するポリシールール（条件 2,3,5,6,7,8,12前半,13,14,15）、(2) 別 Issue に委ねる（条件1=#128、条件4=#100）、(3) 既存ルールが既に正しい形で新規不要（条件10,15）、(4) 処遇不要・廃止（条件9,11=#137）。各条件の詳細な検討（ルール文案・他ルールとの非重複検証・実装順の制約）は #142。
@@ -365,24 +365,23 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 本メモの設計は試作段階の想定であり、実装で確認が取れているのは一部。概略:
 
-- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains）— #112 Phase B0 で実装済み。semantic_distance・data_classification・confidence の個別ポリシールール（`deny_intent_mismatch_delete`・`step_up_pii_delete`・`step_up_low_confidence`/`defer_low_confidence`）— #112 Phase B1〜B3 で実装済み。confidence の evaluability 定義に基づく LLM 検出層（`confidence_llm.py`。`copy(src,src)` 型の意味論的矛盾・曖昧な意図の検出、fail-closed、受領書への減点幅・検出理由の記録）— #112 Phase C で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
-- **設計のみ・未実装**: 条件14（production + destructive → STEP_UP）— #142 で実装予定。
-  条件2（`action_matches_intent=false AND distance > 0.4` の破壊/書込 DENY）は #142 で実装済み
-  （`deny_intent_mismatch_destructive`）。
+- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains・boolean 直接値）— #112 Phase B0・#141 で実装済み。個別ポリシールール（`deny_intent_mismatch_destructive`〔条件2〕・`deny_scope_expansion_unjustified`〔条件3〕・`step_up_pii_delete`・`step_up_sensitive_read`〔条件13〕・`step_up_production_destructive`〔条件14〕・`allow_information_gathering`〔条件12前半〕・`step_up_low_confidence`/`defer_low_confidence`）— #112 Phase B1〜B3・#142 で実装済み。confidence の evaluability 定義に基づく LLM 検出層（`confidence_llm.py`。`copy(src,src)` 型の意味論的矛盾・曖昧な意図の検出、fail-closed、受領書への減点幅・検出理由の記録）— #112 Phase C で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
+- **設計のみ・未実装**: 条件5・6・7・8（ALLOW 4本、ctx-ALLOW 帯 140/130/120/110）— #142 で実装予定。
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証。
-- **条件1〜15 の再検証完了（#112 Phase D）**: 条件1・13・15 はデフォルト benchmark 実行で確定再現
-  （`deny_dynamic_delete_intent_mismatch`・`step_up_pii_delete`・`step_up_low_confidence_external_action`）。
-  条件6・7・12 は明示 ALLOW ルール化の対象（#139）。「baseline ALLOW で自然に出るため専用ルール不要」という従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤り。
-  条件3 は `deny_scope_expansion_unjustified` として実装済み（#142）。条件4 は既存の記述どおり
-  （別 Issue の穴、#100）。条件11 は廃止（#137）。条件9/10（confidence 低下 →
-  DEFER のメカニズム自体）は #112 Phase C で実装済みで `step_up_semantic_contradiction_copy`
-  （`--pipeline` 実行）で確認できるが、当初の実演シナリオだった旧デモシナリオ8「古いファイル」は
-  条件2（#142）実装後は confidence LLM 検出層に到達する前に DENY で確定するようになった——詳細は
-  §3「条件9/10: メカニズムと、条件2 実装後の scenario 8 の位置づけ」を参照。条件14 は上記のとおり
-  未実装。
+- **条件1〜15 の状況**: 条件2・3・13・14・12前半は実装済み（#142、上記）。条件6・7・12後半は明示
+  ALLOW ルール化の対象（#139）だが条件6・7・8・5 は未実装。「baseline ALLOW で自然に出るため専用
+  ルール不要」という従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤り。
+  条件1 は #128 に係属（単一信号に写像不可）。条件4 は別 Issue の穴（#100）。条件11 は廃止（#137）。
+  条件9/10（confidence 低下 → DEFER のメカニズム自体）は #112 Phase C で実装済みで
+  `step_up_semantic_contradiction_copy`（`--pipeline` 実行）で確認できるが、当初の実演シナリオ
+  だった旧デモシナリオ8「古いファイル」は条件2 実装後は confidence LLM 検出層に到達する前に DENY
+  で確定するようになった。同様に条件3 実装後は、旧 `step_up_low_confidence_external_action`
+  （webhook）も STEP_UP から DENY に変わり、`step_up_low_confidence` のデフォルト実行（非
+  `--pipeline`）での決定論的発火例が失われた——詳細は §3「条件9/10」節を参照。条件15 は既存
+  `step_up_low_confidence` で対応済み・新規ルール不要。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、
-  composite risk（#100）、priority 体系化（#129。条件2・14 の割り当てを含む）。δ 参照ポリシーは
+  composite risk（#100）、priority 体系化（#129。条件2・3・14 の割り当てを含む）。δ 参照ポリシーは
   本リファクタ内で段階実装（旧 #107 吸収）。
 
 ---

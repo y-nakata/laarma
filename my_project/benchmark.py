@@ -61,6 +61,11 @@ class BenchmarkCase:
     expected_decision: str
     expected_modified_params: dict[str, Any] | None
     identity: dict[str, Any] | None = None
+    # 非 None のとき、result.policy_rule_id と一致することを要求する（#142 パス2）。decision の
+    # 一致だけでは「明示ルールが実際に発火したか」を検証できない——条件5〜8 の存在理由（#139）は
+    # baseline と同じ decision（ALLOW）を明示ルールとして記録することそのものなので、そのルールが
+    # 壊れて baseline_allow に落ちても decision は ALLOW のまま変わらず検知できない穴があった。
+    expected_rule_id: str | None = None
     # 非空のとき、評価対象の action の前に同一セッション（同一 runtime）でこれらを
     # 順に intercept() する。decision は見ない（副作用なく context を積むためだけに使う）。
     # 累積 δ（例: data_classification）がセッション内の先行アクションから育つケースを
@@ -96,6 +101,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 expected_modified_params=data.get("expected_modified_params"),
                 identity=data.get("identity"),
                 prior_actions=data.get("prior_actions", []),
+                expected_rule_id=data.get("expected_rule_id"),
                 known_regression_until=data.get("known_regression_until"),
                 policy_file=data.get("policy_file"),
                 pipeline_only=data.get("pipeline_only", False),
@@ -138,8 +144,8 @@ def compare_modified_params(actual: dict[str, Any] | None, expected: dict[str, A
 
 def run_case(
     case: BenchmarkCase, pipeline_enabled: bool
-) -> tuple[Decision, dict[str, Any] | None, float, str | None, dict]:
-    """Returns (decision, modified_params, elapsed_seconds, reason, context_summary)."""
+) -> tuple[Decision, dict[str, Any] | None, float, str | None, dict, str | None]:
+    """Returns (decision, modified_params, elapsed_seconds, reason, context_summary, policy_rule_id)."""
     env = build_environment(case.environment)
     # case に identity.privilege_scope があればそれを使い、なければ評価対象ツールのみ許可する
     # （デフォルトはツールが必ずスコープ内になるため privilege_scope DENY は発火しない）
@@ -183,7 +189,7 @@ def run_case(
     start = time.monotonic()
     result = runtime.intercept(case.action["tool_name"], case.action["parameters"])
     elapsed = time.monotonic() - start
-    return result.decision, result.modified_params, elapsed, result.reason, runtime.context_summary
+    return result.decision, result.modified_params, elapsed, result.reason, runtime.context_summary, result.policy_rule_id
 
 
 def run_step_up_unit_tests() -> int:
@@ -296,13 +302,14 @@ def main() -> int:
                 print(f"⏭️  Case: {case.id} (skipped, pipeline_only — use --pipeline)\n")
             continue
 
-        decision, modified_params, elapsed, reason, context = run_case(case, args.pipeline)
+        decision, modified_params, elapsed, reason, context, rule_id = run_case(case, args.pipeline)
         total_time += elapsed
         summary[decision.value] += 1
 
         ok = (
             decision.value == case.expected_decision
             and compare_modified_params(modified_params, case.expected_modified_params)
+            and (case.expected_rule_id is None or rule_id == case.expected_rule_id)
         )
         # pipeline_only ケースは実 LLM の出力に依存し一発で安定しないことがあるため、
         # known_regression_until が無くても mismatch は fail ではなく informational 扱いにする
@@ -334,6 +341,9 @@ def main() -> int:
             print(f"  action: {case.action}")
             print(f"  expected: {case.expected_decision}")
             print(f"  actual:   {decision.value}")
+            if case.expected_rule_id is not None:
+                print(f"  expected_rule_id: {case.expected_rule_id}")
+                print(f"  actual_rule_id:   {rule_id}")
             if reason:
                 print(f"  reason:   {reason}")
             if case.expected_modified_params or modified_params:

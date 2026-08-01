@@ -253,10 +253,14 @@ class ContextAccumulator:
         時点の値」であり、累積はその定義に含まれない（drift_observation() が semantic_distance の
         集計・トレンドを δn から分離しているのと同じ理由）。
         """
+        # any() は None を偽として扱うため素通しでも動くが、それは「判定不能は検出なしと同じ」
+        # という黙示の規則になり、derived_signals() 側（None を安全側＝非match）とは向きが違う
+        # 意味を偶然帯びてしまう。ここでは明示的に「True のものだけを検出とみなす（判定不能は
+        # 累積検出に寄与しない）」規則としてコード上に残す（#160）。
         return {
             "cumulative_data_classification": sorted(set(self._cumulative_data_classification)),
-            "scope_expansion_detected":       any(self._scope_expansions),
-            "scope_expansion_recent":         any(self._scope_expansions[-self._DRIFT_WINDOW:]),
+            "scope_expansion_detected":       any(x is True for x in self._scope_expansions),
+            "scope_expansion_recent":         any(x is True for x in self._scope_expansions[-self._DRIFT_WINDOW:]),
         }
 
     def drift_observation(self) -> dict:

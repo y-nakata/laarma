@@ -31,7 +31,7 @@ from unittest.mock import patch
 
 from laarma import AARMRuntime, Decision, EnvironmentContext, IdentityContext, MaintenanceWindow, load_policy
 from laarma.confidence_llm import NullConfidenceLLM
-from laarma.scope_expansion_llm import NullScopeExpansionDetector
+from laarma.scope_expansion_llm import NullScopeExpansionDetector, UndeterminedScopeExpansionDetector
 from laarma.models import Action, AuthorizationResult
 from laarma.step_up_resolver import StepUpResolver
 from my_project.identity_keys import load_or_create_keypair
@@ -83,6 +83,11 @@ class BenchmarkCase:
     # --pipeline 未指定時は実行自体をスキップする。--pipeline 指定時に実行しても、LLM 出力に
     # 依存し一発で安定しないことがあるため mismatch は fail ではなく informational 扱いにする。
     pipeline_only: bool = False
+    # True のとき、scope_expansion_llm に UndeterminedScopeExpansionDetector を使う。
+    # external_tools 該当アクションを常に scope_expansion=None（判定不能）にし、実 LLM を
+    # 呼ばずに fail-closed の三値化（#160）の下流（_compute_confidence の減点・
+    # deny_scope_expansion_unjustified の non-match）を決定論的に検証する。
+    force_scope_expansion_undetermined: bool = False
     note: str | None = None  # ケースの検証意図・素性の説明（ロジックには使わない）
 
 
@@ -106,6 +111,7 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 known_regression_until=data.get("known_regression_until"),
                 policy_file=data.get("policy_file"),
                 pipeline_only=data.get("pipeline_only", False),
+                force_scope_expansion_undetermined=data.get("force_scope_expansion_undetermined", False),
                 note=data.get("note"),
             ))
     return cases
@@ -177,7 +183,10 @@ def run_case(
     # scope_expansion も同じ gating。NullScopeExpansionDetector は「検出なし固定」ではなく
     # 旧文字列マッチヒューリスティックに委譲するため、デフォルト実行の scope_expansion 依存
     # ケースの挙動は変わらない（#99）。
-    scope_expansion_llm = None if (case.pipeline_only and pipeline_enabled) else NullScopeExpansionDetector()
+    if case.force_scope_expansion_undetermined:
+        scope_expansion_llm = UndeterminedScopeExpansionDetector()
+    else:
+        scope_expansion_llm = None if (case.pipeline_only and pipeline_enabled) else NullScopeExpansionDetector()
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,

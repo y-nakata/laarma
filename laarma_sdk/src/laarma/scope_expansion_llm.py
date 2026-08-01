@@ -189,6 +189,30 @@ class NullScopeExpansionDetector:
         )
 
 
+class UndeterminedScopeExpansionDetector:
+    """
+    external_tools に該当するアクションでは常に (None, reason) を返すテスト用スタブ（#160）。
+    実 LLM を呼ばずに「scope_expansion の判定に失敗した」状態を決定論的に再現し、
+    fail-closed が None（判定不能）に着地する経路を benchmark で検証するために使う。
+    NullScopeExpansionDetector（旧ヒューリスティックへ委譲、常に true/false）とは異なり、
+    ScopeExpansionDetector.detect() の fail-closed 分岐が実際に到達するかは検証しない
+    （そちらは呼び出し失敗そのものを再現できないため、この経路の代わりに down-stream
+    ——_compute_confidence()・policy 側の non-match——だけを検証する）。
+    """
+
+    def detect(
+        self,
+        user_intent: str,
+        tool_name: str,
+        parameters: dict[str, Any],
+        external_tools: frozenset[str],
+        recent_actions: list,
+    ) -> tuple[bool | None, str | None]:
+        if tool_name not in external_tools:
+            return (False, None)
+        return (None, "テスト用: scope_expansion 判定不能を強制")
+
+
 def create_default_scope_expansion_detector() -> ScopeExpansionDetector:
     """
     既定の scope_expansion LLM 検出層を返す。`confidence_llm.py` の

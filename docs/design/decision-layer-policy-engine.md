@@ -445,13 +445,15 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   ヒューリスティックの精度不足による暫定的な制約であり（#128 issuecomment-5151069908）、条件2 の
   ツール制限撤廃（`read_file`/`list_files` のみ `none_of` 除外、#161）はこの一般化の実装である。
 
-  `my_project/tools.py` が実装を持つツール（`read_file`/`write_file`/`list_files`/`delete_file`/
-  `drop_database`）の範囲では、情報収集は `read_file`/`list_files` のみで両方とも除外済みであり、
-  残りはすべて破壊/書込（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に
-  確定）。したがって現ドメインでは条件2 のスコープと条件12後半の原則は一致しており、この一般化は
-  現ドメインの挙動を変えない。効果が及ぶのは `tools.py` に実装を持たない benchmark 専用の擬似ツール
-  （`database`/`webhook` 等、Action を直接構築するテスト用のツール名）のみであり、将来ドメインが
-  広がった場合に備えた記述である。
+  条件2 の対象はツール名の値そのものであり、`my_project/tools.py` の実装有無とは無関係に判定する。
+  `tools.py` が実装するツール（`read_file`/`write_file`/`list_files`/`delete_file`/`drop_database`）
+  だけを見ると、情報収集は `read_file`/`list_files` のみで両方とも除外済みであり、残りはすべて
+  破壊/書込（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定）——たまたま
+  この一般化の対象になるツールが実装側に存在しない。一般化の効果は、`tools.py` に実装のない
+  ツール名（`database`/`webhook` 等、`benchmark_data.jsonl` が `Action` を直接構築して使う、
+  破壊/書込でも情報収集でもない性質のツールを代表する名前）に対する判定として、既に
+  `my_project/benchmark.py` で検証されている。`tools.py` に同種のツールの実装が追加された場合も、
+  同じ判定がそのまま適用される。
 
   条件1（単一信号に写像不可な意味論的
   整合の判断）は整合信号として #128 が仮決めし、その

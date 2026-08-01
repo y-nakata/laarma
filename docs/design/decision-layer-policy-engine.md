@@ -446,14 +446,19 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   ツール制限撤廃（`read_file`/`list_files` のみ `none_of` 除外、#161）はこの一般化の実装である。
 
   条件2 の対象はツール名の値そのものであり、`my_project/tools.py` の実装有無とは無関係に判定する。
-  `tools.py` が実装するツール（`read_file`/`write_file`/`list_files`/`delete_file`/`drop_database`）
-  だけを見ると、情報収集は `read_file`/`list_files` のみで両方とも除外済みであり、残りはすべて
-  破壊/書込（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定）——たまたま
-  この一般化の対象になるツールが実装側に存在しない。一般化の効果は、`tools.py` に実装のない
-  ツール名（`database`/`webhook` 等、`benchmark_data.jsonl` が `Action` を直接構築して使う、
-  破壊/書込でも情報収集でもない性質のツールを代表する名前）に対する判定として、既に
-  `my_project/benchmark.py` で検証されている。`tools.py` に同種のツールの実装が追加された場合も、
-  同じ判定がそのまま適用される。
+  `tools.py` が実装する5つのツール（`read_file`/`write_file`/`list_files`/`delete_file`/
+  `drop_database`）は、破壊/書込（`write_file`/`delete_file`/`drop_database`）と情報収集
+  （`read_file`/`list_files`）のいずれかにきれいに分かれる。破壊/書込側は旧条件2（`destructive_tools`/
+  `write_file` 限定）でも一般化後の条件2 でも同じく DENY 対象であり、情報収集側は `none_of` で
+  両方とも除外されている。つまり `tools.py` の範囲では、一般化の前後でどのツールが DENY 対象に
+  なるかは変わらない（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定
+  するため、実際には条件2 自体が関与しない）。
+
+  一般化が判定を変えるのは、破壊/書込でも情報収集でもない性質のツール（例: 外部送信、機微データ
+  への読み取り専用クエリ）に対してだが、そのようなツールは `tools.py` にまだ実装されていない。
+  `database`/`webhook` 等、`benchmark_data.jsonl` が `Action` を直接構築して使う擬似ツール名が
+  この性質を代表しており、一般化の効果は `my_project/benchmark.py` で既に検証されている。`tools.py`
+  に同種のツールの実装が追加された場合も、同じ判定がそのまま適用される。
 
   条件1（単一信号に写像不可な意味論的
   整合の判断）は整合信号として #128 が仮決めし、その

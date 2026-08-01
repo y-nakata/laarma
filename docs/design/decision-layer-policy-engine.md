@@ -214,12 +214,26 @@ scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の D
 | `context.scope_expansion_recent` | `scope_expansion_recent` | boolean | 直接値 |
 
 `data_classification`（累積）と `current_data_classification`（現時点）は粒度の異なる別信号として両方を持つ
-（#143）。累積はセッション全体で一度でも触れた機微データを表し、論文のポリシー例
-`block_external_after_pii`（先行 PII アクセス後の外部送信を DENY）のように「当該アクション自体は
-機微データに触れていないが、セッション内の先行アクセスを理由に判定する」ルールに使う。一方
-「当該アクションが今まさに機微データに触れているか」を見るルール（例: `step_up_pii_delete`）には
-current を使う。累積を「当該アクションの機微性」の意味で使うのは取り違えであり、`scope_expansion_detected`
-（累積 `any`）と対になる形で信号を分けて解決する。
+（#143）。累積はセッション全体で一度でも触れた機微データを表し、`block_external_after_pii`
+（先行 PII アクセス後の外部送信を DENY）のように「当該アクション自体は機微データに触れていないが、
+セッション内の先行アクセスを理由に判定する」ルールに使う。一方「当該アクションが今まさに機微データに
+触れているか」を見るルール（例: `step_up_pii_delete`）には現在値の方を使う。累積を「当該アクションの
+機微性」の意味で使うのは取り違えである。
+
+**`data_classification` の無印名を累積の意味に割り当てた根拠について（訂正）**: 当初、AARM 論文の
+`block_external_after_pii` 例（`context.data_classification CONTAINS "PII"`）を、無印が累積を表す
+根拠として引用していたが、この例は論文 §IV の informative な例示であり、フィールド名や累積性を
+normative に規定するものではない（詳細は [classification-and-policy-model.md](../aarm/classification-and-policy-model.md)・#155）。
+無印＝累積という割り当ては、この例示を参考にした **laarma 独自の実装選択**であって、論文が要求している
+わけではない。
+
+**`scope_expansion_detected`（累積 `any`）を「累積で持つ信号の前例」として引用していた記述も
+訂正する。** `scope_expansion_detected` の累積設計はそれ自体が検証されておらず、後に `derived_signals()`
+自身の契約（このアクション時点の値のみを返す。`4465e40` で確立）に反する未修正の欠陥だったと判明した
+（#156）。バグを前例として引用してしまっていたことになる。`data_classification`/
+`current_data_classification`・`scope_expansion_detected`/`scope_expansion_recent` を含む各信号の
+形（無印を現在値にするか累積にするか、累積系をどこに置くか）は #156 で作り直す。本節の表は
+#156 完了まで現状の実装を反映する暫定の記述である。
 
 `derived_signals()` が返す残り（`entity_set` / `confidence_llm_penalty` / `confidence_llm_detail`）は、
 参照するルールの当てがつくまで開放しない（#140 のアンカー YAGNI と同じ判断軸、#141）。

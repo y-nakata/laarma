@@ -100,7 +100,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | priority | 決定 | 帯の意味 | 現存ルール |
 |---|---|---|---|
 | 1000 | DENY | Forbidden（δ 非参照の静的 DENY・不可侵最上位） | `deny_critical_file_delete_in_prod` |
-| 900 | DENY | 意図整合性 DENY（`semantic_distance`・`action_matches_intent`・`scope_expansion_detected` 参照） | `deny_intent_mismatch_destructive` / `deny_scope_expansion_unjustified` |
+| 900 | DENY | 意図整合性 DENY（`semantic_distance`・`action_matches_intent`・`scope_expansion` 参照） | `deny_intent_mismatch_destructive` / `deny_scope_expansion_unjustified` |
 | 800 | DENY | 文脈依存 DENY（組織固有 DENY 用に予約） | （なし） |
 | 710 | DEFER | カスタム DEFER の詳細化・穴あけ | `production_delete_defer` |
 | 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
@@ -115,7 +115,7 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 - **ctx-ALLOW 帯(100番台)も同様に細分化する**（#142 パス2 総点検）。より具体的で情報量の多い許可理由が優先して出るよう並べる: 140=`allow_destructive_explicit_high_confidence`（条件8）/ 130=`allow_action_matches_intent`（条件5）・`allow_information_gathering`（条件12前半）/ 120=`allow_low_semantic_distance`（条件6）/ 110=`allow_no_sensitive_data`（条件7）。条件7「PII/CONFIDENTIAL を含まない」はほぼ全アクションにマッチする最も消極的な理由のため最下位に置く。条件5〜8・条件12前半とも実装済み（#142）。
 - **帯は幅を持つ**（例: 700 番台・100 番台）。帯どうしの順序が骨格で、帯内の刻みは詳細化の表現。
 - **800（文脈依存 DENY）は現状該当ルールなしの予約帯**。
-- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）・条件3（`scope_expansion_detected` かつ `action_matches_intent=false` の DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に実装済み（いずれも #142）。
+- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）・条件3（`scope_expansion` かつ `action_matches_intent=false` の DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に実装済み（いずれも #142）。
 
 ---
 
@@ -134,17 +134,17 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 |---|---|---|---|
 | 1 | DENY | 意図と矛盾/無相関（読めと言われ write/delete） | 単一の δ 信号に写像しない（`action_matches_intent` より広い意味論的判断のため）。独立した包括 DENY ルールは作らず、意味論的整合の判断は整合信号（**#128**）に委ねる。原文が write/delete 両方をカバーする点（既存ルールの `write_file` 抜け）は条件2 のルールで補完 |
 | 2 | DENY | `action_matches_intent=false` **かつ** `semantic_distance>0.4` の破壊/書込 | `deny_intent_mismatch_destructive`（DENY・900）。既存 `deny_intent_mismatch_delete` を置換。既存の `distance>0.64` 単独条件は、AND ゲートを落とした代償に閾値を吊り上げた近似で原文にない値のため、0.4 に戻して `action_matches_intent=false` との AND を復元し、`write_file`/destructive 群へ拡張する |
-| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。`scope_expansion_detected` の産出が不完全なため暫定移植（本格対応は **#99**）。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
+| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。当該アクション時点の `scope_expansion` を参照する（累積の `scope_expansion_detected` ではない。累積を参照すると一度スコープ外アクセスが起きたセッションでは以降無関係なアクションまで DENY し続ける取り違えになる。#143 と同型のバグで #156 で是正）。`scope_expansion` の産出が不完全なため暫定移植（本格対応は **#99**）。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
 | 4 | DENY | Compositional Risk（アクション系列が攻撃ベクトル） | **移植対象外**。判定する信号が δ になく決定論ルールに落ちない。将来対応は **#100**（危険性軸の拡張）。FRAMEWORK 章の DEFER 記述と重なるが、帰属先は DEFER でなく危険性軸（§4） |
 | 5 | ALLOW | `action_matches_intent=true` または要求が対象を明示 | `allow_action_matches_intent`（ALLOW・ctx-ALLOW 帯・priority 130）。原文の OR 後半は `action_matches_intent` の定義そのものなので前半に吸収 |
 | 6 | ALLOW | `semantic_distance < 0.3` | `allow_low_semantic_distance`（ALLOW・ctx-ALLOW 帯・priority 120）。条件2 の `>0.4` との間の 0.3〜0.4 は明示基準なしで空ける（原設計も同帯に基準を持たない） |
-| 7 | ALLOW | PII/CONFIDENTIAL を含まない | `allow_no_sensitive_data`（ALLOW・ctx-ALLOW 帯・priority 110）。「含まない」は `none_of` で表現し、集合述語の否定形は新設しない。参照信号は `current_data_classification`（当該アクション時点のみ）——原文 `involved in the action` に従い、#142 起票時のコメント案（累積 `data_classification`）から実装時に変更した。条件13 と同じ判断軸（#143）で、累積を使うと一度でも PII に触れたセッションでは以降本ルールが発火しなくなり、条件13 の対になる ALLOW としての相補性が崩れるため |
+| 7 | ALLOW | PII/CONFIDENTIAL を含まない | `allow_no_sensitive_data`（ALLOW・ctx-ALLOW 帯・priority 110）。「含まない」は `none_of` で表現し、集合述語の否定形は新設しない。参照信号は当該アクション時点の `data_classification`——原文 `involved in the action` に従い、#142 起票時のコメント案（累積 `cumulative_data_classification`）から実装時に変更した。条件13 と同じ判断軸（#143）で、累積を使うと一度でも PII に触れたセッションでは以降本ルールが発火しなくなり、条件13 の対になる ALLOW としての相補性が崩れるため |
 | 8 | ALLOW | 破壊的でも明示意図と高 confidence | `allow_destructive_explicit_high_confidence`（ALLOW・ctx-ALLOW 帯・priority 140）。条件5 の部分集合だが「条件5 が拾うから不要」は #139 が退けた baseline 論法と同型のため、独自ルールとして起こす |
 | 9 | DEFER | 意図が曖昧で未認可の自律判断 | **処遇不要**（**#137**）。「未認可の自律判断」は R3(a)(b)(c) のいずれでもなく入口条件にならない。ケース自体は confidence 低下（(c)）経由で成立済み |
 | 10 | DEFER | `confidence < 0.4` かつ追加 context で解決可能 | **新規ルール不要**（**#137**）。既存 `defer_low_confidence`（DEFER・700）が前半のみを条件にしており結果的に正しい形。後半「追加 context で解決可能」は出口条件なので入口に書かない |
 | 11 | DEFER | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ になく、実装に落とせる具体性を持たない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもの |
 | 12 | DEFER 節 | 情報収集系は曖昧でも ALLOW（後半: 介入点は risk が materialize する破壊/書込） | DEFER の起因ではないため DEFER 区分としては射程外。前半は `allow_information_gathering`（ALLOW・ctx-ALLOW 帯）として明示 ALLOW ルール化（`read_file`/`list_files`）。後半の原則は **#128** に係属 |
-| 13 | STEP_UP | PII/CONFIDENTIAL の削除**または重大アクセス** | deletion 側は `step_up_pii_delete`（STEP_UP・600）。significant access（機微データの read）側は `step_up_sensitive_read`（STEP_UP・600、`read_file` のみ・`list_files` は含めない）。いずれも当該ファイル（現時点のアクション）の機微性を見る `context.current_data_classification` を参照し PII/CONFIDENTIAL の両方を拾う（累積 `data_classification` との取り違えと CONFIDENTIAL の抜けを是正、**#143**）。`action_matches_intent` は条件に書かない（原文 "even with explicit user intent" — 明示意図があっても STEP_UP。ALLOW 帯(100)より STEP_UP 帯(600)が優先されることで表現する） |
+| 13 | STEP_UP | PII/CONFIDENTIAL の削除**または重大アクセス** | deletion 側は `step_up_pii_delete`（STEP_UP・600）。significant access（機微データの read）側は `step_up_sensitive_read`（STEP_UP・600、`read_file` のみ・`list_files` は含めない）。いずれも当該ファイル（現時点のアクション）の機微性を見る `context.data_classification`（当該アクション時点のみ）を参照し PII/CONFIDENTIAL の両方を拾う（累積 `cumulative_data_classification` との取り違えと CONFIDENTIAL の抜けを是正、**#143**）。`action_matches_intent` は条件に書かない（原文 "even with explicit user intent" — 明示意図があっても STEP_UP。ALLOW 帯(100)より STEP_UP 帯(600)が優先されることで表現する） |
 | 14 | STEP_UP | 本番の高影響操作 | `step_up_production_destructive`（STEP_UP・600）。本番かつメンテナンス窓内かつ重要ファイル以外という、既存2ルール（`deny_critical_file_delete_in_prod`・`production_delete_defer`）が覆っていない領域を埋める |
 | 15 | STEP_UP | `confidence 0.4-0.6` かつ中程度リスク | **新規ルール不要**。既存 `step_up_low_confidence`（STEP_UP・600）が正しい形。`with moderate risk` は条件に書かない（危険性は evaluability の軸である confidence に混ぜない——§5） |
 
@@ -185,7 +185,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 
 条件3（`deny_scope_expansion_unjustified`、#142）実装により、`step_up_low_confidence` にも同種の
 影響が生じた。既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）は
-`scope_expansion_detected=true` かつ `action_matches_intent=false` を満たすため条件3 に該当し、
+`scope_expansion=true` かつ `action_matches_intent=false` を満たすため条件3 に該当し、
 STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名）。`_compute_confidence`
 の決定論項は distance のみでは下限 0.7 までしか下げられず、0.4〜0.6 の STEP_UP 帯に入れるには
 scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の DENY 条件も満たしてしまうため、
@@ -195,45 +195,47 @@ scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の D
 
 ### δ 参照の記法: `context.<signal>` 述語オブジェクト
 
-ルール条件は `context` 区画で `derived_signals()`（δ）を参照する。記法は述語オブジェクト
-`context.<signal>: {演算子: 値}` であり、`<signal>_gt` のようなキー名にサフィックスを付与する
-方式は採らない。1つの述語オブジェクトに複数の演算子キーを書いた場合は AND 評価する（例:
+ルール条件は `context` 区画で δn（`derived_signals()`）と累積 view（`cumulative_signals()`、#156）を
+マージした dict を参照する（`PolicyEngine.evaluate()` が渡す前に1つの flat dict に合成する）。記法は
+述語オブジェクト `context.<signal>: {演算子: 値}` であり、`<signal>_gt` のようなキー名にサフィックスを
+付与する方式は採らない。1つの述語オブジェクトに複数の演算子キーを書いた場合は AND 評価する（例:
 `{gt: 0.3, lt: 0.9}` で範囲指定）。
 
-参照可能なシグナルと演算子は以下に固定する（`derived_signals()` が返す値のうち、集計・トレンド系
-は `drift_observation()` に分離済みで対象外——現在値のみを参照する）。
+参照可能なシグナルと演算子は以下に固定する（集計・トレンド系は `drift_observation()` に分離済みで
+対象外）。
 
-| `context.<signal>` | `derived_signals()` のキー | 型 | 演算子 |
+| `context.<signal>` | 出典 | 型 | 演算子 |
 |---|---|---|---|
-| `context.semantic_distance` | `semantic_distance` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
-| `context.confidence_level` | `confidence_level` | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
-| `context.data_classification` | `data_classification`（セッション累積） | 集合（sorted set） | `contains` |
-| `context.current_data_classification` | `current_data_classification`（当該アクション時点のみ） | 集合（sorted set） | `contains` |
-| `context.action_matches_intent` | `action_matches_intent` | boolean | 直接値（`true`/`false`。`eq` 一択のため演算子オブジェクトは使わない） |
-| `context.scope_expansion_detected` | `scope_expansion_detected` | boolean | 直接値 |
-| `context.scope_expansion_recent` | `scope_expansion_recent` | boolean | 直接値 |
+| `context.semantic_distance` | `derived_signals()`（当該アクション時点のみ） | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
+| `context.confidence_level` | `derived_signals()`（当該アクション時点のみ） | スカラー（数値） | `gt` / `gte` / `lt` / `lte` / `eq` |
+| `context.data_classification` | `derived_signals()`（当該アクション時点のみ） | 集合（sorted set） | `contains` |
+| `context.cumulative_data_classification` | `cumulative_signals()`（セッション累積） | 集合（sorted set） | `contains` |
+| `context.action_matches_intent` | `derived_signals()`（当該アクション時点のみ） | boolean | 直接値（`true`/`false`。`eq` 一択のため演算子オブジェクトは使わない） |
+| `context.scope_expansion` | `derived_signals()`（当該アクション時点のみ） | boolean | 直接値 |
+| `context.scope_expansion_detected` | `cumulative_signals()`（セッション累積 `any`） | boolean | 直接値 |
+| `context.scope_expansion_recent` | `cumulative_signals()`（直近5件累積 `any`） | boolean | 直接値 |
 
-`data_classification`（累積）と `current_data_classification`（現時点）は粒度の異なる別信号として両方を持つ
-（#143）。累積はセッション全体で一度でも触れた機微データを表し、`block_external_after_pii`
-（先行 PII アクセス後の外部送信を DENY）のように「当該アクション自体は機微データに触れていないが、
-セッション内の先行アクセスを理由に判定する」ルールに使う。一方「当該アクションが今まさに機微データに
-触れているか」を見るルール（例: `step_up_pii_delete`）には現在値の方を使う。累積を「当該アクションの
-機微性」の意味で使うのは取り違えである。
+`data_classification`（当該アクション時点）と `cumulative_data_classification`（セッション累積）は
+粒度の異なる別信号として両方を持つ（#143・#156）。累積はセッション全体で一度でも触れた機微データを
+表し、`block_external_after_pii`（先行 PII アクセス後の外部送信を DENY）のように「当該アクション
+自体は機微データに触れていないが、セッション内の先行アクセスを理由に判定する」ルールに使う。一方
+「当該アクションが今まさに機微データに触れているか」を見るルール（例: `step_up_pii_delete`）には
+当該アクション時点の値を使う。累積を「当該アクションの機微性」の意味で使うのは取り違えである。
+`scope_expansion`/`scope_expansion_detected`/`scope_expansion_recent` も同じ粒度分離を持つ
+（条件3 `deny_scope_expansion_unjustified` は当該アクション時点の `scope_expansion` を使う）。
 
-**`data_classification` の無印名を累積の意味に割り当てた根拠について（訂正）**: 当初、AARM 論文の
+`derived_signals()`（δn）はどの信号も「このアクション時点の値のみ」を持つという契約に統一されている
+（`4465e40` で確立、`4465e40` の取りこぼしにより `scope_expansion` 系だけこの契約に反していたのを
+#156 で是正）。累積・集計系（`cumulative_signals()`・`drift_observation()`）は δn そのものではなく、
+蓄積された文脈 C に対するクエリに相当する導出観測として分離する。
+
+`data_classification`（無印）を当該アクション時点の意味に割り当てた根拠について: 当初 AARM 論文の
 `block_external_after_pii` 例（`context.data_classification CONTAINS "PII"`）を、無印が累積を表す
 根拠として引用していたが、この例は論文 §IV の informative な例示であり、フィールド名や累積性を
 normative に規定するものではない（詳細は [classification-and-policy-model.md](../aarm/classification-and-policy-model.md)・#155）。
-無印＝累積という割り当ては、この例示を参考にした **laarma 独自の実装選択**であって、論文が要求している
-わけではない。
-
-**`scope_expansion_detected`（累積 `any`）を「累積で持つ信号の前例」として引用していた記述も
-訂正する。** `scope_expansion_detected` の累積設計はそれ自体が検証されておらず、後に `derived_signals()`
-自身の契約（このアクション時点の値のみを返す。`4465e40` で確立）に反する未修正の欠陥だったと判明した
-（#156）。バグを前例として引用してしまっていたことになる。`data_classification`/
-`current_data_classification`・`scope_expansion_detected`/`scope_expansion_recent` を含む各信号の
-形（無印を現在値にするか累積にするか、累積系をどこに置くか）は #156 で作り直す。本節の表は
-#156 完了まで現状の実装を反映する暫定の記述である。
+δn は「このステップの値」という R2（`Cn = Cn-1 ∪ {an, on, δn}`）の定義に従い、`derived_signals()`
+配下の無印は当該アクション時点の値、累積は別名（`cumulative_` 接頭辞または `_detected`/`_recent`
+接尾辞）に切り出す方針に統一した。
 
 `derived_signals()` が返す残り（`entity_set` / `confidence_llm_penalty` / `confidence_llm_detail`）は、
 参照するルールの当てがつくまで開放しない（#140 のアンカー YAGNI と同じ判断軸、#141）。

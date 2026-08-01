@@ -138,19 +138,22 @@ rules:
         semantic_distance:
           gt: 0.4
 
-  # scope_expansion_detected（想定スコープ外のツールへのアクセス）かつ action_matches_intent=false
-  # （要求がそのツール/対象を明示参照しない＝意図での正当化がない）を検出したら DENY する（条件3、
-  # #142）。原文の "no justification in user_intent" を action_matches_intent=false で近似する
-  # 暫定移植（scope_expansion_detected の産出自体の本格的な再設計は #99）。semantic_distance は
-  # 絡めない（条件2 と異なり、意図整合の信号同士の掛け合わせに留める）。tool は非限定
-  # （external_tools に限らず scope_expansion_detected を見るツール全般が対象）。
+  # scope_expansion（想定スコープ外のツールへの、このアクションによるアクセス）かつ
+  # action_matches_intent=false（要求がそのツール/対象を明示参照しない＝意図での正当化がない）を
+  # 検出したら DENY する（条件3、#142）。原文の "no justification in user_intent" を
+  # action_matches_intent=false で近似する暫定移植（scope_expansion の産出自体の本格的な
+  # 再設計は #99）。当該アクション時点の scope_expansion を参照する（累積の
+  # scope_expansion_detected ではない）——累積を使うと、一度スコープ外アクセスが起きたセッション
+  # では以降無関係なアクションまで DENY し続ける取り違えになる（#143 と同型のバグ、#156 で是正）。
+  # semantic_distance は絡めない（条件2 と異なり、意図整合の信号同士の掛け合わせに留める）。
+  # tool は非限定（external_tools に限らず scope_expansion を見るツール全般が対象）。
   - id: deny_scope_expansion_unjustified
     decision: DENY
     priority: 900
     reason: "ユーザーの意図で正当化されないスコープ外アクセスを検出したため拒否しました。"
     conditions:
       context:
-        scope_expansion_detected: true
+        scope_expansion: true
         action_matches_intent: false
 
   # 本番環境での破壊的操作を STEP_UP する（条件14、#142）。「十分な文脈はあるが残余リスクがある」
@@ -167,10 +170,10 @@ rules:
       tool: *destructive_tools
       environment_type: production
 
-  # 当該ファイル（現時点のアクション）が PII/CONFIDENTIAL かどうかを見る。累積 data_classification
-  # ではなく current_data_classification を参照する(#143)。累積を使うと、セッション内で先に PII に
-  # 触れた後は PII と無関係なファイルの削除にも STEP_UP してしまう（reason が主張する判定根拠と
-  # 実際の判定根拠が食い違う）。
+  # 当該ファイル（現時点のアクション）が PII/CONFIDENTIAL かどうかを見る。累積
+  # cumulative_data_classification ではなく当該アクション時点の data_classification を参照する
+  # (#143・#156)。累積を使うと、セッション内で先に PII に触れた後は PII と無関係なファイルの削除にも
+  # STEP_UP してしまう（reason が主張する判定根拠と実際の判定根拠が食い違う）。
   - id: step_up_pii_delete
     decision: STEP_UP
     reason: "PII/CONFIDENTIAL を含む可能性のあるファイル '{path}' の削除には追加確認が必要です。"
@@ -179,10 +182,10 @@ rules:
       tool: delete_file
       any_of:
         - context:
-            current_data_classification:
+            data_classification:
               contains: PII
         - context:
-            current_data_classification:
+            data_classification:
               contains: CONFIDENTIAL
 
   # 機微データ（PII/CONFIDENTIAL）への read を STEP_UP する（条件13「significant access」側、#142）。
@@ -197,10 +200,10 @@ rules:
       tool: read_file
       any_of:
         - context:
-            current_data_classification:
+            data_classification:
               contains: PII
         - context:
-            current_data_classification:
+            data_classification:
               contains: CONFIDENTIAL
 
   # confidence_level（evaluability）参照ルール（条件10・15の移行、#112 Phase B3・Phase C）。
@@ -299,12 +302,13 @@ rules:
           lt: 0.3
 
   # 条件7: 当該アクションが機微データ（PII/CONFIDENTIAL）を扱わない。原文 "in the action" に従い
-  # current_data_classification（当該アクション時点のみ）を参照する。累積 data_classification では
-  # ない——#143 の判断軸（当該アクションの性質を見るルールには current_、セッションを跨ぐ文脈には
-  # 累積）を踏襲する。current_ を使うことで、条件13（step_up_pii_delete/step_up_sensitive_read、
-  # 同じく current_data_classification 参照）と論理的に相補になる（条件13 が発火しないケースを
-  # 条件7 が拾う）。reason は当該アクション限定の表現にする（セッション全体で機微データ不関与、と
-  # 誤読されないように。#143 で問題視した「reason が主張する判定根拠と実態の食い違い」を繰り返さない）。
+  # 当該アクション時点の data_classification を参照する。累積 cumulative_data_classification では
+  # ない——#143 の判断軸（当該アクションの性質を見るルールには当該アクション時点の値、セッションを
+  # 跨ぐ文脈には累積）を踏襲する（#156）。当該アクション時点の値を使うことで、条件13
+  # （step_up_pii_delete/step_up_sensitive_read、同じく当該アクション時点の data_classification
+  # 参照）と論理的に相補になる（条件13 が発火しないケースを条件7 が拾う）。reason は当該アクション
+  # 限定の表現にする（セッション全体で機微データ不関与、と誤読されないように。#143 で問題視した
+  # 「reason が主張する判定根拠と実態の食い違い」を繰り返さない）。
   - id: allow_no_sensitive_data
     decision: ALLOW
     priority: 110
@@ -312,8 +316,8 @@ rules:
     conditions:
       none_of:
         - context:
-            current_data_classification:
+            data_classification:
               contains: PII
         - context:
-            current_data_classification:
+            data_classification:
               contains: CONFIDENTIAL

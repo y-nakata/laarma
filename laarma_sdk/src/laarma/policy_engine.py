@@ -17,13 +17,15 @@ PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す単�
   - denied_tools / privilege_scope は `rules` の priority システムの外側にある独立した
     事前チェックとして扱う（R3/Table I の Forbidden 分類——コンテキスト評価が完全に無視される
     唯一の分類——に対応）。
-  - ルール条件は `context.<signal>` で `derived_signals()`（δ）を参照できる。数値シグナル
+  - ルール条件は `context.<signal>` で δn（`derived_signals()`）と累積 view（`cumulative_signals()`、
+    #156）をマージした dict を参照できる。両者はキーが重ならない（例: 現在値は
+    `data_classification`、累積は `cumulative_data_classification`）。数値シグナル
     （semantic_distance / confidence_level）は述語オブジェクト `{演算子: 値}` で
-    gt/gte/lt/lte/eq、集合シグナル（data_classification=セッション累積 /
-    current_data_classification=当該アクション時点のみ）は `{contains: 値}` を使う。
-    boolean シグナル（action_matches_intent / scope_expansion_detected /
-    scope_expansion_recent）は演算子オブジェクトでなく直接値（`action_matches_intent: false`）
-    で書く（`eq` 一択で演算子の明示が無意味なため）。
+    gt/gte/lt/lte/eq、集合シグナル（data_classification=当該アクション時点のみ /
+    cumulative_data_classification=セッション累積）は `{contains: 値}` を使う。
+    boolean シグナル（scope_expansion=当該アクション時点のみ / action_matches_intent /
+    scope_expansion_detected・scope_expansion_recent=セッション累積）は演算子オブジェクトで
+    なく直接値（`action_matches_intent: false`）で書く（`eq` 一択で演算子の明示が無意味なため）。
     R3(a)（未 populate な context 参照 → DEFER）は実装しない。laarma の同期モデルでは δ は
     評価前に必ず算出され「未 populate」が生じないため（derived_signals() は常にデフォルト値で
     埋まる）。
@@ -221,7 +223,13 @@ class PolicyEngine:
         #    （または MODIFY が複数マッチした）場合は terminal DEFER（R3(b) 競合トリガー）。
         rule_proposal: AuthorizationResult | None = None
         current_params = dict(action.parameters)
-        derived_signals = context_summary.get("derived_signals", {})
+        # δn（このアクション時点の値）と累積 view（#156）を1つの flat dict にマージしてから
+        # 条件評価に渡す。両者はキーが重ならないよう命名されている（例: 現在値は
+        # data_classification、累積は cumulative_data_classification）。
+        derived_signals = {
+            **context_summary.get("derived_signals", {}),
+            **context_summary.get("cumulative_signals", {}),
+        }
 
         matches = self._collect_matching_rules(action, environment, derived_signals)
         if matches:

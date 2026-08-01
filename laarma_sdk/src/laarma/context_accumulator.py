@@ -63,9 +63,17 @@ def _action_matches_intent(user_intent: str, tool_name: str, parameters: dict) -
     return False
 
 
+# scope_expansion が None（LLM 呼び出し失敗により判定不能、#160）のときの追加減点。
+# 「scope_expansion ではないと判定された」（減点なし）でも「scope_expansion と判定された」
+# （-0.25）でもなく、判定そのものができなかったことを confidence 側に反映する。
+# deny_scope_expansion_unjustified への断定的な誘導を避けつつ、評価不能な状態を放置しない
+# ため、確定した scope_expansion=True と同じ -0.25 を暫定値として使う（#77 較正対象）。
+_SCOPE_EXPANSION_UNDETERMINED_PENALTY = 0.25
+
+
 def _compute_confidence(
     semantic_distance: float,
-    scope_expansion: bool,
+    scope_expansion: bool | None,
     action_matches_intent: bool,
     llm_penalty: float = 0.0,
 ) -> float:
@@ -74,6 +82,10 @@ def _compute_confidence(
     AARM 仕様 §IV-C: confidence は「(a, C) を自信を持って評価できる度合い」であり、
     アクションの危険度ではない。危険度は data_classification シグナルを参照する
     ポリシー条件（STEP_UP / DENY）が担う。
+
+    scope_expansion は true/false に加えて None（判定不能、#160）を取りうる三値。
+    None は scope_expansion LLM 検出層（scope_expansion_llm.py）の呼び出し失敗を表し、
+    _SCOPE_EXPANSION_UNDETERMINED_PENALTY で減点する。
 
     llm_penalty は #112 Phase C の confidence LLM 検出層（confidence_llm.py）による
     追加減点。決定論項（distance/scope_expansion/action_matches_intent）だけでは
@@ -84,8 +96,10 @@ def _compute_confidence(
     # 意味的距離が高いほど評価が困難
     score -= semantic_distance * 0.3
 
-    # スコープ拡張は想定外のコンテキストであり評価が困難
-    if scope_expansion:
+    # スコープ拡張は想定外のコンテキストであり評価が困難。判定不能もこれに準じて減点する。
+    if scope_expansion is None:
+        score -= _SCOPE_EXPANSION_UNDETERMINED_PENALTY
+    elif scope_expansion:
         score -= 0.25
 
     # 明示的な意図との一致があれば評価しやすい
@@ -113,7 +127,7 @@ class ContextAccumulator:
         self._cumulative_data_classification: list[str] = []
         self._data_classification: list[str]            = []
         self._semantic_distances:   list[float] = []
-        self._scope_expansions:     list[bool]  = []
+        self._scope_expansions:     list[bool | None] = []
         self._scope_expansion_details: list[str | None] = []
         self._entity_set:           set[str]    = set()
         self._confidence_history:   list[float] = []

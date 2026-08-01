@@ -211,7 +211,7 @@ scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の D
 | `context.data_classification` | `derived_signals()`（当該アクション時点のみ） | 集合（sorted set） | `contains` |
 | `context.cumulative_data_classification` | `cumulative_signals()`（セッション累積） | 集合（sorted set） | `contains` |
 | `context.action_matches_intent` | `derived_signals()`（当該アクション時点のみ） | boolean | 直接値（`true`/`false`。`eq` 一択のため演算子オブジェクトは使わない） |
-| `context.scope_expansion` | `derived_signals()`（当該アクション時点のみ） | boolean | 直接値 |
+| `context.scope_expansion` | `derived_signals()`（当該アクション時点のみ） | boolean（三値。`null`＝判定不能、#160） | 直接値 |
 | `context.scope_expansion_detected` | `cumulative_signals()`（セッション累積 `any`） | boolean | 直接値 |
 | `context.scope_expansion_recent` | `cumulative_signals()`（直近5件累積 `any`） | boolean | 直接値 |
 
@@ -223,6 +223,16 @@ scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の D
 当該アクション時点の値を使う。累積を「当該アクションの機微性」の意味で使うのは取り違えである。
 `scope_expansion`/`scope_expansion_detected`/`scope_expansion_recent` も同じ粒度分離を持つ
 （条件3 `deny_scope_expansion_unjustified` は当該アクション時点の `scope_expansion` を使う）。
+
+`scope_expansion` は `true`/`false` に加えて `null`（判定不能）を取りうる三値信号である（#160）。
+`null` は `ScopeExpansionDetector`（LLM 判定）の呼び出し自体が失敗した（例外・応答形式不正）ことを
+表し、「LLM が判定した結果 scope_expansion ではない」（`false`）とは区別される。`_match_context_predicate`
+は値が `None` の述語を安全側（不一致）として扱う既存の設計（#112 Phase B0）により、`scope_expansion:
+true` を条件とする `deny_scope_expansion_unjustified`（DENY・900・terminal）は `null` では発火しない
+——判定不能な状態から、回復不能な terminal DENY へ断定的に倒すことを避ける。代わりに `null` は
+`_compute_confidence()` の減点（`_SCOPE_EXPANSION_UNDETERMINED_PENALTY`）として confidence 側に反映され、
+`defer_low_confidence`/`step_up_low_confidence` を経由して人間の判断に委ねられる（`confidence_llm.py`
+の fail-closed が DEFER/STEP_UP に着地するのと同じ設計に揃えた）。
 
 `derived_signals()`（δn）はどの信号も「このアクション時点の値のみ」を持つという契約に統一されている
 （`4465e40` で確立、`4465e40` の取りこぼしにより `scope_expansion` 系だけこの契約に反していたのを

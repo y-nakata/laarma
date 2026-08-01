@@ -111,17 +111,20 @@ class ScopeExpansionDetector:
         parameters: dict[str, Any],
         external_tools: frozenset[str],
         recent_actions: list,
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool | None, str | None]:
         """
         Returns:
             (is_scope_expansion, reason) — external_tools に含まれないツールは LLM を呼ばず
             即座に (False, None) を返す（scope_expansion の定義上、外部送信/外部アクセス系
             ツールでなければ想定スコープ外にはなりえない）。
 
-            fail-closed 時は scope_expansion=True を返す。これは deny_scope_expansion_unjustified
-            （DENY・900・terminal）に直行しうる——confidence_llm.py の fail-closed が DEFER/STEP_UP
-            に着地し人間承認や DeferralResolver で回復できるのと非対称（#160 で可用性の姿勢として
-            検討中。安全側に倒す現状の設計自体は誤りではないが、意図した仕様として確定してはいない）。
+            LLM 呼び出しが失敗する（例外・応答形式不正）場合は True/False ではなく None
+            （判定不能）を返す（#160）。これは「判定した結果 scope_expansion ではない」と
+            「判定そのものができなかった」を区別するための三値表現——`_match_context_predicate`
+            は None を安全側（不一致）として扱うため、scope_expansion を参照する DENY 条件
+            （deny_scope_expansion_unjustified 等）は None では発火しない。代わりに
+            `_compute_confidence()` が None を判定不能として減点し、DEFER/STEP_UP 経由で
+            人間の回復経路に委ねる（confidence_llm.py の fail-closed と同じ設計）。
         """
         if tool_name not in external_tools:
             return (False, None)
@@ -157,11 +160,11 @@ class ScopeExpansionDetector:
             parsed = json.loads(raw)
             authorized = parsed.get("authorized")
             if not isinstance(authorized, bool):
-                return (True, f"LLM 応答の authorized 値が不正なため fail-closed で scope_expansion 扱い: {parsed!r}")
+                return (None, f"LLM 応答の authorized 値が不正なため scope_expansion 判定不能: {parsed!r}")
             reason = _truncate(str(parsed.get("reason", "(reason not provided)")), _MAX_REASON_LEN)
             return (not authorized, reason)
         except Exception as e:
-            return (True, f"LLM 応答異常のため fail-closed で scope_expansion 扱い: {e}")
+            return (None, f"LLM 応答異常のため scope_expansion 判定不能: {e}")
 
 
 class NullScopeExpansionDetector:
@@ -179,7 +182,7 @@ class NullScopeExpansionDetector:
         parameters: dict[str, Any],
         external_tools: frozenset[str],
         recent_actions: list,
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool | None, str | None]:
         return (
             _detect_scope_expansion_heuristic(user_intent, tool_name, parameters, external_tools),
             None,

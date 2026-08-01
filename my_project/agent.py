@@ -141,6 +141,8 @@ def run(user_request: str, proxy: ToolProxy, initial_messages: list[dict[str, ob
         # action_matches_intent は LLM 判定（#161）により true になる（削除自体は手続き的に
         # 妥当なステップと判定される）ため DENY にはならないが、「掃除」が削除・移動・整理の
         # いずれを意味するか特定できない曖昧さを confidence LLM 検出層が検出して DEFER する。
+        # 単一キーワードでの識別（他シナリオの user_request と衝突しないことが前提）。#166 で他
+        # シナリオの文言を変更する際は、「掃除」が新たに含まれないか確認すること。
         is_scenario_8 = "掃除" in user_request
         has_list_files_done = any(
             isinstance(m.get("content"), list)

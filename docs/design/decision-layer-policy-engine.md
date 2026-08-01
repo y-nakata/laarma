@@ -446,9 +446,15 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   精度不足による暫定的な AS-IS の制約であり（#128 issuecomment-5151069908）、条件2 のツール制限
   撤廃（`read_file`/`list_files` のみ `none_of` 除外、#161）はそれを「risk が materialize しない
   無害な準備ステップでは介入せず、実際にリスクが生じるアクションで介入する」という一般化された
-  原則へ TO BE として拡張した判断である（#165 で訂正・クローズ済み）。この一般化における
-  `read_file`/`list_files` 以外の情報収集系ツール（例: 読み取り専用の `database` クエリ）の扱いは
-  未解決の非対称として残っており、#169 に切り出した。条件1（単一信号に写像不可な意味論的
+  原則へ TO BE として拡張した判断である（#165 で訂正・クローズ済み）。なお `my_project/tools.py`
+  が実装を持つツール（`read_file`/`write_file`/`list_files`/`delete_file`/`drop_database`）の
+  範囲では、情報収集にあたるのは `read_file`/`list_files` のみで両方とも除外済みであり、残りは
+  すべて破壊/書込（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定）
+  のため、現ドメインでは条件2 のスコープと条件12後半の原則は一致している——一般化が現ドメインの
+  挙動を変えているわけではなく、`database`/`webhook` 等の benchmark 専用の擬似ツール（tools.py に
+  実装を持たない、Action を直接構築するテスト用の仮のツール名）にのみ及ぶ、将来ドメインが
+  広がった場合に備えた先回りの記述という位置づけである（#165・#169 での訂正を経て確定）。
+  条件1（単一信号に写像不可な意味論的
   整合の判断）は整合信号として #128 が仮決めし、その
   産出手段を `action_matches_intent` の LLM 化（#161）に統合したことで解消した（別信号を新設せず、
   条件2・3 が参照する `action_matches_intent` 自体がこの判断を担う）。条件4 は別 Issue の穴
@@ -465,8 +471,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   `step_up_low_confidence` で対応済み・新規ルール不要。
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証は未了。
-- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、composite risk（#100）、
-  情報収集系の条件2 除外がツール名2件のハードコードに留まる非対称（#169）。
+- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、composite risk（#100）。
   δ 参照ポリシーは #112 で段階実装済み（旧 #107 吸収）。priority 体系化（#129）はクローズ済み。
   scope_expansion の LLM 検出層（#99）・fail-closed の三値化（#160）・action_matches_intent の
   LLM 検出層（#161、整合信号の統合含む、#128）は実装済み。confidence LLM 検出層の実演シナリオ
@@ -481,4 +486,4 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
 - 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（#112 が触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
-- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外がツール名2件のハードコードに留まる非対称。#165 レビューでの指摘）、#150（confidence LLM 検出層の実演シナリオ）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）
+- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外の非対称を指摘したが、根拠にした `database` が tools.py に実装を持たない擬似ツールだったため取り下げ、クローズ済み）、#150（confidence LLM 検出層の実演シナリオ）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

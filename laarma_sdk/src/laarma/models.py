@@ -196,6 +196,10 @@ class AuthorizationResult:
     # None は「LLM 層自体が呼ばれていない」を表す。
     confidence_llm_penalty: float | None    = None
     confidence_llm_detail:  str | None      = None
+    # #99: scope_expansion 判定への LLM 検出層による検出理由。decision には関与しない（decision を
+    # 出すのは scope_expansion を参照するポリシールール）が、confidence_llm_detail と同じ理由で
+    # 受領書に記録する。
+    scope_expansion_detail: str | None      = None
     # DEFER ワークフロー用フィールド
     deferral_reason:       str | None      = None
     resolution_method:     str | None      = None  # "autonomous" | "step_up" | "human_approved" | "human_denied" | None
@@ -232,6 +236,7 @@ class AuthorizationResult:
             "policy_rule_id":     self.policy_rule_id,
             "confidence_llm_penalty": self.confidence_llm_penalty,
             "confidence_llm_detail":  self.confidence_llm_detail,
+            "scope_expansion_detail": self.scope_expansion_detail,
             "deferral_reason":    self.deferral_reason,
             "proposed_decision":  self.proposed_decision,
             "resolution_method":  self.resolution_method,
@@ -270,6 +275,8 @@ class AuthorizationResult:
             d["confidence_llm_penalty"] = self.confidence_llm_penalty
         if self.confidence_llm_detail:
             d["confidence_llm_detail"] = self.confidence_llm_detail
+        if self.scope_expansion_detail:
+            d["scope_expansion_detail"] = self.scope_expansion_detail
         if self.proposed_decision:
             d["proposed_decision"] = self.proposed_decision
         if self.deferral_reason:

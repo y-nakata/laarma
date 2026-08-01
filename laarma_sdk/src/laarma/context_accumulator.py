@@ -19,6 +19,7 @@ from ._text_sanitize import _sanitize_recent_actions
 from .confidence_llm import create_default_confidence_llm
 from .distance_calculator import DistanceCalculator, create_default_distance_calculator
 from .models import Action, AuthorizationResult, SessionContext
+from .scope_expansion_llm import create_default_scope_expansion_detector
 
 _DEFAULT_PII_KEYWORDS      = frozenset({"email", "password", "phone", "address", "ssn", "credit", "customer", "personal", "name", "info"})
 _DEFAULT_CONFIDENTIAL_KEYS = frozenset({"secret", "token", "key", "credential", "private", "internal", "config"})
@@ -40,10 +41,6 @@ def _classify_data(
     if any(k in combined for k in confidential_keywords): labels.append("CONFIDENTIAL")
     if tool_name in sensitive_tools:                      labels.append("SENSITIVE_TOOL")
     return labels or ["PUBLIC"]
-
-
-def _detect_scope_expansion(user_intent: str, tool_name: str, parameters: dict, external_tools: frozenset[str]) -> bool:
-    return tool_name in external_tools and "send" not in user_intent.lower() and "email" not in user_intent.lower()
 
 
 def _extract_entities(tool_name: str, parameters: dict) -> set[str]:
@@ -109,6 +106,7 @@ class ContextAccumulator:
         distance_calculator: DistanceCalculator | None = None,
         policy: Any | None = None,
         confidence_llm: Any | None = None,
+        scope_expansion_llm: Any | None = None,
     ) -> None:
         self._context = SessionContext(user_intent=user_intent, metadata=metadata or {})
         self._receipts: list[dict]  = []
@@ -116,6 +114,7 @@ class ContextAccumulator:
         self._data_classification: list[str]            = []
         self._semantic_distances:   list[float] = []
         self._scope_expansions:     list[bool]  = []
+        self._scope_expansion_details: list[str | None] = []
         self._entity_set:           set[str]    = set()
         self._confidence_history:   list[float] = []
         self._action_matches_intent: list[bool] = []
@@ -123,6 +122,7 @@ class ContextAccumulator:
         self._confidence_llm_details:   list[str | None] = []
         self._distance_calculator = distance_calculator or create_default_distance_calculator()
         self._confidence_llm      = confidence_llm or create_default_confidence_llm()
+        self._scope_expansion_llm = scope_expansion_llm or create_default_scope_expansion_detector()
         self._pii_keywords         = (policy.pii_keywords          if policy and policy.pii_keywords          is not None else _DEFAULT_PII_KEYWORDS)
         self._confidential_keywords = (policy.confidential_keywords if policy and policy.confidential_keywords is not None else _DEFAULT_CONFIDENTIAL_KEYS)
         self._sensitive_tools      = (policy.sensitive_tools        if policy and policy.sensitive_tools       is not None else _DEFAULT_SENSITIVE_TOOLS)
@@ -143,9 +143,12 @@ class ContextAccumulator:
             self._context.user_intent, action.tool_name, action.parameters)
         self._semantic_distances.append(dist)
 
-        expanded = _detect_scope_expansion(
-            self._context.user_intent, action.tool_name, action.parameters, self._external_tools)
+        expanded, scope_expansion_detail = self._scope_expansion_llm.detect(
+            self._context.user_intent, action.tool_name, action.parameters, self._external_tools,
+            recent_actions=_sanitize_recent_actions(self.recent_actions(n=5)),
+        )
         self._scope_expansions.append(expanded)
+        self._scope_expansion_details.append(scope_expansion_detail)
 
         self._entity_set.update(_extract_entities(action.tool_name, action.parameters))
 
@@ -212,12 +215,14 @@ class ContextAccumulator:
         current_confidence = c[-1] if c else 1.0
         m = self._action_matches_intent
         se = self._scope_expansions
+        sed = self._scope_expansion_details
         p = self._confidence_llm_penalties
         det = self._confidence_llm_details
         return {
             "data_classification":   sorted(set(self._data_classification)),
             "semantic_distance":     d[-1] if d else 0.0,
             "scope_expansion":       se[-1] if se else False,
+            "scope_expansion_detail": sed[-1] if sed else None,
             "action_matches_intent": m[-1] if m else False,
             "entity_set":            sorted(self._entity_set),
             "confidence_level":      current_confidence,

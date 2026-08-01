@@ -31,6 +31,7 @@ from unittest.mock import patch
 
 from laarma import AARMRuntime, Decision, EnvironmentContext, IdentityContext, MaintenanceWindow, load_policy
 from laarma.confidence_llm import NullConfidenceLLM
+from laarma.scope_expansion_llm import NullScopeExpansionDetector
 from laarma.models import Action, AuthorizationResult
 from laarma.step_up_resolver import StepUpResolver
 from my_project.identity_keys import load_or_create_keypair
@@ -173,6 +174,10 @@ def run_case(
     # （confidence_llm=None → AARMRuntime の既定ファクトリ経由で SemanticAmbiguityDetector）を
     # 使う。それ以外は常に NullConfidenceLLM（実 API を叩かない）。#112 Phase C。
     confidence_llm = None if (case.pipeline_only and pipeline_enabled) else NullConfidenceLLM()
+    # scope_expansion も同じ gating。NullScopeExpansionDetector は「検出なし固定」ではなく
+    # 旧文字列マッチヒューリスティックに委譲するため、デフォルト実行の scope_expansion 依存
+    # ケースの挙動は変わらない（#99）。
+    scope_expansion_llm = None if (case.pipeline_only and pipeline_enabled) else NullScopeExpansionDetector()
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,
@@ -180,6 +185,7 @@ def run_case(
         policy=policy,
         transform_registry=_TRANSFORM_REGISTRY,
         confidence_llm=confidence_llm,
+        scope_expansion_llm=scope_expansion_llm,
     )
     # 評価対象より前に同一セッションへ積む先行アクション（#143）。decision は見ない
     # （record_action は intercept() 内で policy 評価より前に走るため、privilege_scope で

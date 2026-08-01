@@ -50,7 +50,7 @@ AARM の R2 は、コンテキスト蓄積 `Cn = Cn-1 ∪ {an, on, δn}` を要�
 - **`sensitive_tools`** — 機密性の高い操作を行うツール名（デフォルト: `database` / `db` / `execute_shell` / `execute_sql`）
 - **`external_tools`** — 外部送信を行うツール名（デフォルト: `send_email` / `http_request` / `webhook` / `slack_message`）
 
-これらは **policy で上書き可能**である（`policy.destructive_tools` / `policy.sensitive_tools` / `policy.external_tools` が指定されればそれを使い、無ければデフォルト集合）。`sensitive_tools` は data_classification の `SENSITIVE_TOOL` ラベル付けに使われる。`external_tools` は `scope_expansion` 派生シグナルの判定（`_detect_scope_expansion()`）に使われる——「ツールが外部送信か」という宣言的分類であり、「意図がその送信を認可しているか」という意味判定とは役割が異なる。後者は IntentAlignment が担う。
+これらは **policy で上書き可能**である（`policy.destructive_tools` / `policy.sensitive_tools` / `policy.external_tools` が指定されればそれを使い、無ければデフォルト集合）。`sensitive_tools` は data_classification の `SENSITIVE_TOOL` ラベル付けに使われる。`external_tools` は `scope_expansion` 派生シグナルの判定に使われる——「ツールが外部送信か」という宣言的分類であり、「意図がその送信を認可しているか」という意味判定とは役割が異なる。後者は `scope_expansion_llm.py` の `ScopeExpansionDetector`（LLM 判定、#99）が担う。
 
 これらは「enum 型のリスク等級」ではなく、**データ分類とスコープ判定を補助する設定値**である点が重要。固定の3段階等級ではなく、運用ごとに調整できる集合として持つ。
 
@@ -74,7 +74,8 @@ laarma は、ツールごとに `READ_ONLY` / `WRITE` / `DESTRUCTIVE` のよう�
 
 ## 関連
 
-- `laarma_sdk/src/laarma/context_accumulator.py` の `_classify_data()`、`_detect_scope_expansion()`、`_DEFAULT_*` 集合、`_compute_confidence()`
+- `laarma_sdk/src/laarma/context_accumulator.py` の `_classify_data()`、`_DEFAULT_*` 集合、`_compute_confidence()`
+- `laarma_sdk/src/laarma/scope_expansion_llm.py` の `ScopeExpansionDetector`（scope_expansion の LLM 判定、#99）
 - `laarma_sdk/src/laarma/policy_engine.py` の `Policy`（`destructive_tools` / `sensitive_tools` / `external_tools` / `pii_keywords` / `confidential_keywords` の上書きフィールド）
 - 提案/上書きモデル（PolicyEngine と IntentAlignment の関係）: [policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - README の仕様準拠状況: R2（コンテキスト蓄積）

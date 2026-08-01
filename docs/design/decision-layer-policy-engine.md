@@ -134,7 +134,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 |---|---|---|---|
 | 1 | DENY | 意図と矛盾/無相関（読めと言われ write/delete） | 単一の δ 信号に写像しない（`action_matches_intent` より広い意味論的判断のため）。独立した包括 DENY ルールは作らず、意味論的整合の判断は整合信号（**#128**）に委ねる。原文が write/delete 両方をカバーする点（既存ルールの `write_file` 抜け）は条件2 のルールで補完 |
 | 2 | DENY | `action_matches_intent=false` **かつ** `semantic_distance>0.4` の破壊/書込 | `deny_intent_mismatch_destructive`（DENY・900）。既存 `deny_intent_mismatch_delete` を置換。既存の `distance>0.64` 単独条件は、AND ゲートを落とした代償に閾値を吊り上げた近似で原文にない値のため、0.4 に戻して `action_matches_intent=false` との AND を復元し、`write_file`/destructive 群へ拡張する |
-| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。当該アクション時点の `scope_expansion` を参照する（累積の `scope_expansion_detected` ではない。累積を参照すると一度スコープ外アクセスが起きたセッションでは以降無関係なアクションまで DENY し続ける取り違えになる。#143 と同型のバグで #156 で是正）。`scope_expansion` の産出が不完全なため暫定移植（本格対応は **#99**）。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
+| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。当該アクション時点の `scope_expansion` を参照する（累積の `scope_expansion_detected` ではない。累積を参照すると一度スコープ外アクセスが起きたセッションでは以降無関係なアクションまで DENY し続ける取り違えになる。#143 と同型のバグで #156 で是正）。`scope_expansion` の産出手段は `scope_expansion_llm.py` の `ScopeExpansionDetector`（LLM 判定、**#99** で実装済み）——旧実装（"send"/"email" の部分文字列マッチ）は日本語 user_intent を一切読めない多言語破綻を持っていた。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
 | 4 | DENY | Compositional Risk（アクション系列が攻撃ベクトル） | **移植対象外**。判定する信号が δ になく決定論ルールに落ちない。将来対応は **#100**（危険性軸の拡張）。FRAMEWORK 章の DEFER 記述と重なるが、帰属先は DEFER でなく危険性軸（§4） |
 | 5 | ALLOW | `action_matches_intent=true` または要求が対象を明示 | `allow_action_matches_intent`（ALLOW・ctx-ALLOW 帯・priority 130）。原文の OR 後半は `action_matches_intent` の定義そのものなので前半に吸収 |
 | 6 | ALLOW | `semantic_distance < 0.3` | `allow_low_semantic_distance`（ALLOW・ctx-ALLOW 帯・priority 120）。条件2 の `>0.4` との間の 0.3〜0.4 は明示基準なしで空ける（原設計も同帯に基準を持たない） |
@@ -240,8 +240,9 @@ normative に規定するものではない（詳細は [classification-and-poli
 `derived_signals()` が返す残り（`entity_set` / `confidence_llm_penalty` / `confidence_llm_detail`）は、
 参照するルールの当てがつくまで開放しない（#140 のアンカー YAGNI と同じ判断軸、#141）。
 
-`scope_expansion_detected` / `scope_expansion_recent` は参照可能だが、値そのものの精度（scope_expansion の
-intent 側 LLM 判定が未完了、#99）はこの表の範囲外——「引けるかどうか」と「信号の意味論が十分か」は別軸。
+`scope_expansion_detected` / `scope_expansion_recent` の産出手段も `scope_expansion` と同じ
+`ScopeExpansionDetector`（#99）を経由する（`_scope_expansions` 一次列に積まれた各ステップの
+LLM 判定結果を、累積 `any()`/直近5件 `any()` として `cumulative_signals()` が導出する）。
 
 未参照の context を DEFER トリガーにする R3(a)（CONFORMANCE 章、次節参照）は実装しない。laarma は
 δ を評価前に必ず算出してから policy 評価に渡す同期モデルであり、`derived_signals()` は履歴が無い
@@ -381,7 +382,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 
 本メモの設計は試作段階の想定であり、実装で確認が取れているのは一部。概略:
 
-- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains・boolean 直接値）— #112 Phase B0・#141 で実装済み。個別ポリシールール（`deny_intent_mismatch_destructive`〔条件2〕・`deny_scope_expansion_unjustified`〔条件3〕・`allow_action_matches_intent`〔条件5〕・`allow_low_semantic_distance`〔条件6〕・`allow_no_sensitive_data`〔条件7〕・`allow_destructive_explicit_high_confidence`〔条件8〕・`step_up_pii_delete`・`step_up_sensitive_read`〔条件13〕・`step_up_production_destructive`〔条件14〕・`allow_information_gathering`〔条件12前半〕・`step_up_low_confidence`/`defer_low_confidence`）— #112 Phase B1〜B3・#142 で実装済み。confidence の evaluability 定義に基づく LLM 検出層（`confidence_llm.py`。`copy(src,src)` 型の意味論的矛盾・曖昧な意図の検出、fail-closed、受領書への減点幅・検出理由の記録）— #112 Phase C で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
+- **実装済み・確認可能**: semantic distance の埋め込み計算（式4、`distance_calculator.py`）。決定層のポリシー評価エンジン化（LLM decision 判定の除去、priority 解決、MODIFY の1パス terminal 化、同一 priority 競合の DEFER）— #112 Phase A で実装済み。δ を参照する match predicate の共通機構（`context.<signal>` 述語評価。数値 gt/gte/lt/lte/eq・集合 contains・boolean 直接値）— #112 Phase B0・#141 で実装済み。個別ポリシールール（`deny_intent_mismatch_destructive`〔条件2〕・`deny_scope_expansion_unjustified`〔条件3〕・`allow_action_matches_intent`〔条件5〕・`allow_low_semantic_distance`〔条件6〕・`allow_no_sensitive_data`〔条件7〕・`allow_destructive_explicit_high_confidence`〔条件8〕・`step_up_pii_delete`・`step_up_sensitive_read`〔条件13〕・`step_up_production_destructive`〔条件14〕・`allow_information_gathering`〔条件12前半〕・`step_up_low_confidence`/`defer_low_confidence`）— #112 Phase B1〜B3・#142 で実装済み。confidence の evaluability 定義に基づく LLM 検出層（`confidence_llm.py`。`copy(src,src)` 型の意味論的矛盾・曖昧な意図の検出、fail-closed、受領書への減点幅・検出理由の記録）— #112 Phase C で実装済み。scope_expansion の LLM 検出層（`scope_expansion_llm.py` の `ScopeExpansionDetector`。旧文字列マッチの多言語破綻を解消、fail-closed、受領書への検出理由の記録）— #99 で実装済み。benchmark（`my_project/benchmark.py`）で回帰確認済み。
 - **条件1〜15 の状況（全15条件の移植完了、#142）**: 条件2・3・5・6・7・8・13・14・12前半は明示
   ポリシールールとして実装済み（上記）。「baseline ALLOW で自然に出るため専用ルール不要」という
   従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤りと確定し（#139）、
@@ -397,9 +398,9 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   `step_up_low_confidence` で対応済み・新規ルール不要。
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証は未了。
-- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、scope_expansion 再設計（#99）、
-  composite risk（#100）、priority 体系化（#129。条件2・3・14 の割り当てを含む）。δ 参照ポリシーは
-  本リファクタ内で段階実装（旧 #107 吸収）。
+- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、composite risk（#100）。
+  δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。priority 体系化（#129）はクローズ済み、
+  scope_expansion の LLM 検出層（#99）は実装済み。
 
 ---
 
@@ -410,4 +411,4 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
 - 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（本リファクタが触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
-- 関連 Issue: #112（本設計の実装。#94 後継）、#94（signal/decision 分離。#112 に立て直し・not_planned クローズ）、#107（δ 参照拡張。#112 に吸収・not_planned クローズ）、#99（scope_expansion）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）
+- 関連 Issue: #112（本設計の実装。#94 後継。クローズ済み）、#94（signal/decision 分離。#112 に立て直し・not_planned クローズ）、#107（δ 参照拡張。#112 に吸収・not_planned クローズ）、#99（scope_expansion の LLM 検出層。実装済み）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

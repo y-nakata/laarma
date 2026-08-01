@@ -71,7 +71,7 @@ decision を出す LLM 判定（現行 IntentAlignment）は除去する。**
 
 - **活かす**: `distance_calculator.py`（semantic distance の埋め込み計算 = 式4。既に LLM を使わずコードで実装済み。コサイン類似度と `1 - cosine` の距離変換を numpy で計算）。Context Accumulator の δ 産出。
 - **除去する**: `intent_alignment.py` の「decision を出す LLM 判定」（(a,C) を LLM に渡して ALLOW/DENY/… を得る部分）。`_confirm_with_ia` の提案/上書き構造。
-- **新設・拡張する**: ポリシーの match predicate が δ（semantic distance・data_classification・confidence 等）を参照できるようにする（match predicate の δ 参照は本リファクタの中核機構で、骨格ができた段階でデモポリシー需要駆動に段階実装する。旧 #107 は本リファクタに吸収）。δ を閾値/集合で参照するポリシーが、現行 LLM が担っていた判定の大半を代替する。加えて、confidence 計算への LLM 活用（§5）。
+- **新設・拡張する**: ポリシーの match predicate が δ（semantic distance・data_classification・confidence 等）を参照できるようにする（match predicate の δ 参照は #112 の中核機構で、需要駆動に段階実装した。旧 #107 は #112 に吸収）。δ を閾値/集合で参照するポリシーが、現行 LLM が担っていた判定の大半を代替する。加えて、confidence 計算への LLM 活用（§5）。
 
 ### 処理順序の転換
 
@@ -371,7 +371,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 触るコンポーネント（概略）:
 - **除去**: `intent_alignment.py` の decision 判定 LLM、`policy_engine.py` の `_confirm_with_ia` 提案/上書き構造、および静的ルール収束ループ（`max_modify_iterations`。§2「MODIFY は1パス変換で terminal」参照）。
 - **活かす**: `distance_calculator.py`、Context Accumulator の δ 産出。
-- **拡張**: `_match_conditions`（δ 参照。本リファクタ内で需要駆動に段階実装、旧 #107 吸収）、ポリシー評価を priority 解決の (a,C) 評価エンジンに（MODIFY は1パス変換で terminal、同一 priority 複数 MODIFY は DEFER）。confidence 計算への LLM 活用（§5）。
+- **拡張**: `_match_conditions`（δ 参照。#112 で需要駆動に段階実装、旧 #107 吸収）、ポリシー評価を priority 解決の (a,C) 評価エンジンに（MODIFY は1パス変換で terminal、同一 priority 複数 MODIFY は DEFER）。confidence 計算への LLM 活用（§5）。
 - **影響**: `docs/design/policy-engine-proposal-override.md`（提案/上書きモデルの正典）は本設計により置き換え済みのためアーカイブ化した。
 - **温存（本設計では触らない）**: `max_actions`（回数上限による運用バックストップ。ゴールに近づかないまま動作を継続する状態＝intent drift 的な暴走を、drift 検出機構が無い現状で回数によって粗く肩代わりして止める。AARM の (a, C) 意図評価とは無関係の運用ガードであり、本物の drift 検出〔δ の distance drift / scope_expansion、#99〕が入れば役割はそちらへ移る。現状 benchmark ではどのケースも閾値〔既定 50〕に届かず休眠）。
 
@@ -400,7 +400,7 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証は未了。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、composite risk（#100）。
-  δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。priority 体系化（#129）はクローズ済み。
+  δ 参照ポリシーは #112 で段階実装済み（旧 #107 吸収）。priority 体系化（#129）はクローズ済み。
   scope_expansion の LLM 検出層（#99）は実装済み（PR #159、未クローズ）。
 
 ---
@@ -411,5 +411,5 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - AARM 論文 arXiv:2602.09433: 式2（Context Accumulation）、式3（Policy Structure）、式4（semantic distance）、R3・R7、§IV-B-4（FRAMEWORK 章 DEFER）、§IV-C、Contribution 2
 - 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
-- 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（本リファクタが触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
+- 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（#112 が触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
 - 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層。実装は PR #159、未クローズ）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

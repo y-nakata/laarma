@@ -112,8 +112,8 @@ class ContextAccumulator:
     ) -> None:
         self._context = SessionContext(user_intent=user_intent, metadata=metadata or {})
         self._receipts: list[dict]  = []
-        self._data_classification: list[str]   = []
-        self._current_data_classification: list[str] = []
+        self._cumulative_data_classification: list[str] = []
+        self._data_classification: list[str]            = []
         self._semantic_distances:   list[float] = []
         self._scope_expansions:     list[bool]  = []
         self._entity_set:           set[str]    = set()
@@ -136,8 +136,8 @@ class ContextAccumulator:
             action.tool_name, action.parameters,
             self._pii_keywords, self._confidential_keywords, self._sensitive_tools,
         )
-        self._data_classification.extend(classification)
-        self._current_data_classification = classification
+        self._cumulative_data_classification.extend(classification)
+        self._data_classification = classification
 
         dist = self._distance_calculator.compute(
             self._context.user_intent, action.tool_name, action.parameters)
@@ -215,7 +215,7 @@ class ContextAccumulator:
         p = self._confidence_llm_penalties
         det = self._confidence_llm_details
         return {
-            "data_classification":   sorted(set(self._current_data_classification)),
+            "data_classification":   sorted(set(self._data_classification)),
             "semantic_distance":     d[-1] if d else 0.0,
             "scope_expansion":       se[-1] if se else False,
             "action_matches_intent": m[-1] if m else False,
@@ -235,7 +235,7 @@ class ContextAccumulator:
         集計・トレンドを δn から分離しているのと同じ理由）。
         """
         return {
-            "cumulative_data_classification": sorted(set(self._data_classification)),
+            "cumulative_data_classification": sorted(set(self._cumulative_data_classification)),
             "scope_expansion_detected":       any(self._scope_expansions),
             "scope_expansion_recent":         any(self._scope_expansions[-self._DRIFT_WINDOW:]),
         }

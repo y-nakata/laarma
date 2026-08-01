@@ -437,23 +437,22 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   ポリシールールとして実装済み（上記）。「baseline ALLOW で自然に出るため専用ルール不要」という
   従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤りと確定し（#139）、
   条件5〜8 の明示 ALLOW 化で解消した。条件12後半（原文 "reserve DEFER/DENY for the actual
-  destructive or write action where the risk materializes"）は ALLOW ルール化の対象外のまま
-  #128 で検討していたが、原文は文法上「risk が顕在化する『破壊/書込アクション』に DEFER/DENY を
-  予約せよ」と読むのが素直であり、「破壊/書込」を単なる例示とし対象を risk-materializing なアクション
-  一般へ広げる読みを原文が積極的に支持するわけではない（#165 レビュー指摘）。本設計はその読みを
-  原文の解釈としてではなく、TO BE に向けた意図的な一般化として採用する——旧条件2 の
-  `destructive_tools`/`write_file` 限定は当時の `action_matches_intent` ヒューリスティックの
-  精度不足による暫定的な AS-IS の制約であり（#128 issuecomment-5151069908）、条件2 のツール制限
-  撤廃（`read_file`/`list_files` のみ `none_of` 除外、#161）はそれを「risk が materialize しない
-  無害な準備ステップでは介入せず、実際にリスクが生じるアクションで介入する」という一般化された
-  原則へ TO BE として拡張した判断である（#165 で訂正・クローズ済み）。なお `my_project/tools.py`
-  が実装を持つツール（`read_file`/`write_file`/`list_files`/`delete_file`/`drop_database`）の
-  範囲では、情報収集にあたるのは `read_file`/`list_files` のみで両方とも除外済みであり、残りは
-  すべて破壊/書込（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定）
-  のため、現ドメインでは条件2 のスコープと条件12後半の原則は一致している——一般化が現ドメインの
-  挙動を変えているわけではなく、`database`/`webhook` 等の benchmark 専用の擬似ツール（tools.py に
-  実装を持たない、Action を直接構築するテスト用の仮のツール名）にのみ及ぶ、将来ドメインが
-  広がった場合に備えた先回りの記述という位置づけである（#165・#169 での訂正を経て確定）。
+  destructive or write action where the risk materializes"）は ALLOW ルール化の対象外だが、
+  その原則は条件2 の設計に反映する。原文は文法上「破壊/書込アクション」への適用に限定して読めるが、
+  本設計はこれを「risk が materialize しない無害な準備ステップ（情報収集）では介入せず、実際に
+  リスクが生じるアクションで介入する」という原則へ意図的に一般化した TO BE の判断として採用する
+  （#165）。旧条件2 の `destructive_tools`/`write_file` 限定は、当時の `action_matches_intent`
+  ヒューリスティックの精度不足による暫定的な制約であり（#128 issuecomment-5151069908）、条件2 の
+  ツール制限撤廃（`read_file`/`list_files` のみ `none_of` 除外、#161）はこの一般化の実装である。
+
+  `my_project/tools.py` が実装を持つツール（`read_file`/`write_file`/`list_files`/`delete_file`/
+  `drop_database`）の範囲では、情報収集は `read_file`/`list_files` のみで両方とも除外済みであり、
+  残りはすべて破壊/書込（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に
+  確定）。したがって現ドメインでは条件2 のスコープと条件12後半の原則は一致しており、この一般化は
+  現ドメインの挙動を変えない。効果が及ぶのは `tools.py` に実装を持たない benchmark 専用の擬似ツール
+  （`database`/`webhook` 等、Action を直接構築するテスト用のツール名）のみであり、将来ドメインが
+  広がった場合に備えた記述である。
+
   条件1（単一信号に写像不可な意味論的
   整合の判断）は整合信号として #128 が仮決めし、その
   産出手段を `action_matches_intent` の LLM 化（#161）に統合したことで解消した（別信号を新設せず、

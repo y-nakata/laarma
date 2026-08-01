@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ._text_sanitize import _sanitize_recent_actions
+from .action_matches_intent_llm import create_default_action_matches_intent_detector
 from .confidence_llm import create_default_confidence_llm
 from .distance_calculator import DistanceCalculator, create_default_distance_calculator
 from .models import Action, AuthorizationResult, SessionContext
@@ -52,17 +53,6 @@ def _extract_entities(tool_name: str, parameters: dict) -> set[str]:
     return entities
 
 
-def _action_matches_intent(user_intent: str, tool_name: str, parameters: dict) -> bool:
-    """ユーザーの要求がアクションのツール名や主要パラメータと明示的に一致するか判定する。"""
-    text = user_intent.lower()
-    if tool_name.lower().replace("_", " ") in text:
-        return True
-    for value in parameters.values():
-        if isinstance(value, str) and value.lower() in text:
-            return True
-    return False
-
-
 # scope_expansion が None（LLM 呼び出し失敗により判定不能、#160）のときの追加減点。
 # 「scope_expansion ではないと判定された」（減点なし）でも「scope_expansion と判定された」
 # （-0.25）でもなく、判定そのものができなかったことを confidence 側に反映する。
@@ -70,11 +60,19 @@ def _action_matches_intent(user_intent: str, tool_name: str, parameters: dict) -
 # ため、確定した scope_expansion=True と同じ -0.25 を暫定値として使う（#77 較正対象）。
 _SCOPE_EXPANSION_UNDETERMINED_PENALTY = 0.25
 
+# action_matches_intent が None（LLM 呼び出し失敗により判定不能、#161）のときの追加減点。
+# action_matches_intent=true は +0.1 の加点（評価しやすさの根拠）だが、判定不能はその加点が
+# 得られないだけでなく、意図整合という評価軸そのものが不明であることを表すため、加点と同じ
+# 幅を減点として計上する（#77 較正対象。scope_expansion の -0.25 と揃えなかったのは、
+# scope_expansion=true 自体が -0.25 の既存減点項を持つのに対し、action_matches_intent=false
+# には対応する減点項が無く、加点の欠落分だけを不確実性として計上するのが対称的なため）。
+_ACTION_MATCHES_INTENT_UNDETERMINED_PENALTY = 0.1
+
 
 def _compute_confidence(
     semantic_distance: float,
     scope_expansion: bool | None,
-    action_matches_intent: bool,
+    action_matches_intent: bool | None,
     llm_penalty: float = 0.0,
 ) -> float:
     """
@@ -83,9 +81,9 @@ def _compute_confidence(
     アクションの危険度ではない。危険度は data_classification シグナルを参照する
     ポリシー条件（STEP_UP / DENY）が担う。
 
-    scope_expansion は true/false に加えて None（判定不能、#160）を取りうる三値。
-    None は scope_expansion LLM 検出層（scope_expansion_llm.py）の呼び出し失敗を表し、
-    _SCOPE_EXPANSION_UNDETERMINED_PENALTY で減点する。
+    scope_expansion・action_matches_intent は共に true/false に加えて None（判定不能、
+    #160・#161）を取りうる三値。None はそれぞれの LLM 検出層（scope_expansion_llm.py・
+    action_matches_intent_llm.py）の呼び出し失敗を表し、対応するペナルティで減点する。
 
     llm_penalty は #112 Phase C の confidence LLM 検出層（confidence_llm.py）による
     追加減点。決定論項（distance/scope_expansion/action_matches_intent）だけでは
@@ -102,8 +100,11 @@ def _compute_confidence(
     elif scope_expansion:
         score -= 0.25
 
-    # 明示的な意図との一致があれば評価しやすい
-    if action_matches_intent:
+    # 明示的な意図との一致があれば評価しやすい。判定不能は加点を得られないだけでなく、
+    # 意図整合という評価軸自体が不明であることを減点として計上する。
+    if action_matches_intent is None:
+        score -= _ACTION_MATCHES_INTENT_UNDETERMINED_PENALTY
+    elif action_matches_intent:
         score += 0.1
 
     # LLM が検出した意味論的な曖昧さ・矛盾による追加減点（多層防御, #112 Phase C）
@@ -121,6 +122,7 @@ class ContextAccumulator:
         policy: Any | None = None,
         confidence_llm: Any | None = None,
         scope_expansion_llm: Any | None = None,
+        action_matches_intent_llm: Any | None = None,
     ) -> None:
         self._context = SessionContext(user_intent=user_intent, metadata=metadata or {})
         self._receipts: list[dict]  = []
@@ -131,12 +133,14 @@ class ContextAccumulator:
         self._scope_expansion_details: list[str | None] = []
         self._entity_set:           set[str]    = set()
         self._confidence_history:   list[float] = []
-        self._action_matches_intent: list[bool] = []
+        self._action_matches_intent: list[bool | None] = []
+        self._action_matches_intent_details: list[str | None] = []
         self._confidence_llm_penalties: list[float]      = []
         self._confidence_llm_details:   list[str | None] = []
         self._distance_calculator = distance_calculator or create_default_distance_calculator()
         self._confidence_llm      = confidence_llm or create_default_confidence_llm()
         self._scope_expansion_llm = scope_expansion_llm or create_default_scope_expansion_detector()
+        self._action_matches_intent_llm = action_matches_intent_llm or create_default_action_matches_intent_detector()
         self._pii_keywords         = (policy.pii_keywords          if policy and policy.pii_keywords          is not None else _DEFAULT_PII_KEYWORDS)
         self._confidential_keywords = (policy.confidential_keywords if policy and policy.confidential_keywords is not None else _DEFAULT_CONFIDENTIAL_KEYS)
         self._sensitive_tools      = (policy.sensitive_tools        if policy and policy.sensitive_tools       is not None else _DEFAULT_SENSITIVE_TOOLS)
@@ -166,8 +170,11 @@ class ContextAccumulator:
 
         self._entity_set.update(_extract_entities(action.tool_name, action.parameters))
 
-        matches_intent = _action_matches_intent(
-            self._context.user_intent, action.tool_name, action.parameters)
+        matches_intent, action_matches_intent_detail = self._action_matches_intent_llm.detect(
+            self._context.user_intent, action.tool_name, action.parameters,
+            recent_actions=_sanitize_recent_actions(self.recent_actions(n=5)),
+        )
+        self._action_matches_intent_details.append(action_matches_intent_detail)
 
         # #112 Phase C: 決定論項だけでは捉えられない意味論的な曖昧さ・矛盾を LLM で検出し、
         # confidence への追加減点として反映する（LLM は decision を出さない）。
@@ -228,6 +235,7 @@ class ContextAccumulator:
         c = self._confidence_history
         current_confidence = c[-1] if c else 1.0
         m = self._action_matches_intent
+        amd = self._action_matches_intent_details
         se = self._scope_expansions
         sed = self._scope_expansion_details
         p = self._confidence_llm_penalties
@@ -238,6 +246,7 @@ class ContextAccumulator:
             "scope_expansion":       se[-1] if se else False,
             "scope_expansion_detail": sed[-1] if sed else None,
             "action_matches_intent": m[-1] if m else False,
+            "action_matches_intent_detail": amd[-1] if amd else None,
             "entity_set":            sorted(self._entity_set),
             "confidence_level":      current_confidence,
             "confidence_llm_penalty": p[-1] if p else 0.0,

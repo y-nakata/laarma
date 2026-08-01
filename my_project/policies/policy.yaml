@@ -125,14 +125,27 @@ rules:
   # DENY に倒れる。これは字義どおり移植した帰結として確定した設計判断（#142）——旧ルールの
   # distance>0.64 のもとで DEFER 期待になっていた benchmark ケースは、AND ゲートを落とした
   # 歪曲の産物であり、変化前の期待値を維持する理由にはしない。
+  #
+  # tool は destructive_tools/write_file 限定から拡張したが、read_file/list_files は none_of で
+  # 明示的に除外する（#161）。当初 destructive_tools/write_file に限定していたのは、
+  # action_matches_intent の文字列包含判定が不正確で、対象を広げると正当な情報収集（list_files
+  # 等）まで誤って本条件の DENY 対象に含めかねなかったため（#128 issuecomment-5151069908）。
+  # action_matches_intent を「アクションが意図に認可・含意されているか」を問う LLM 判定に
+  # 置き換えれば解決すると見込んだ（#128 issuecomment-5151473158 の実測4ケース）が、これは
+  # 「古いファイルを整理して」→list_files のような手続き的含意が明確な意図に限られると判明した。
+  # より曖昧な意図（「何か手伝えることある？」→list_files）では実 LLM でも authorized=false と
+  # 判定され（実測 distance=0.972, confidence=0.208）、条件2 が allow_information_gathering
+  # （ALLOW・130、条件12前半）を握り潰す。read_file/list_files は非破壊・低リスクという原設計の
+  # 前提（条件12前半、#142）を優先し、意図の曖昧さを問わず常に ALLOW される対象として本条件から
+  # 除外する。非破壊アクションの意図逸脱検知（#128 が本来の射程とした drift/hijack 検知）は
+  # read_file/list_files 以外のツール（webhook・database 等）で引き続き機能する。
   - id: deny_intent_mismatch_destructive   # 旧 deny_intent_mismatch_delete を置換
     decision: DENY
-    reason: "ユーザーの意図から乖離した破壊/書込操作 '{path}' を検出したため拒否しました。"
+    reason: "ユーザーの意図から乖離した操作を検出したため拒否しました。"
     priority: 900
     conditions:
-      any_of:
-        - tool: *destructive_tools
-        - tool: write_file
+      none_of:
+        - tool: [read_file, list_files]
       context:
         action_matches_intent: false
         semantic_distance:

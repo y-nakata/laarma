@@ -200,6 +200,9 @@ class AuthorizationResult:
     # 出すのは scope_expansion を参照するポリシールール）が、confidence_llm_detail と同じ理由で
     # 受領書に記録する。
     scope_expansion_detail: str | None      = None
+    # #161: action_matches_intent 判定への LLM 検出層による検出理由。scope_expansion_detail と
+    # 同じ理由で受領書に記録する。
+    action_matches_intent_detail: str | None = None
     # DEFER ワークフロー用フィールド
     deferral_reason:       str | None      = None
     resolution_method:     str | None      = None  # "autonomous" | "step_up" | "human_approved" | "human_denied" | None
@@ -237,6 +240,7 @@ class AuthorizationResult:
             "confidence_llm_penalty": self.confidence_llm_penalty,
             "confidence_llm_detail":  self.confidence_llm_detail,
             "scope_expansion_detail": self.scope_expansion_detail,
+            "action_matches_intent_detail": self.action_matches_intent_detail,
             "deferral_reason":    self.deferral_reason,
             "proposed_decision":  self.proposed_decision,
             "resolution_method":  self.resolution_method,
@@ -277,6 +281,8 @@ class AuthorizationResult:
             d["confidence_llm_detail"] = self.confidence_llm_detail
         if self.scope_expansion_detail:
             d["scope_expansion_detail"] = self.scope_expansion_detail
+        if self.action_matches_intent_detail:
+            d["action_matches_intent_detail"] = self.action_matches_intent_detail
         if self.proposed_decision:
             d["proposed_decision"] = self.proposed_decision
         if self.deferral_reason:

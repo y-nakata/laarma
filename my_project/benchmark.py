@@ -30,6 +30,10 @@ if str(_root) not in sys.path:
 from unittest.mock import patch
 
 from laarma import AARMRuntime, Decision, EnvironmentContext, IdentityContext, MaintenanceWindow, load_policy
+from laarma.action_matches_intent_llm import (
+    NullActionMatchesIntentDetector,
+    UndeterminedActionMatchesIntentDetector,
+)
 from laarma.confidence_llm import NullConfidenceLLM
 from laarma.scope_expansion_llm import NullScopeExpansionDetector, UndeterminedScopeExpansionDetector
 from laarma.models import Action, AuthorizationResult
@@ -75,6 +79,13 @@ class BenchmarkCase:
     # 非 None のとき、expected_decision とのミスマッチは fail ではなく informational として
     # 扱う（値は「いつ回復する見込みか」の注記、例: "Phase B"。ロジックには使わない）。
     known_regression_until: str | None = None
+    # 非 None のとき、expected_decision とのミスマッチは fail ではなく informational として
+    # 扱う。known_regression_until とは異なる種類の欠落を表す——「いつか直る不具合」ではなく、
+    # 「ヒューリスティック検出層（Null*Detector）は原理的にこの判定を再現できない」という
+    # 恒久的な制約（#161）。値はどの信号がなぜヒューリスティックで再現不能かの説明。実 LLM
+    # 経由（--pipeline）では別途 mismatch にならないことを確認すること——ならない場合は
+    # ヒューリスティックの限界ではなく実装の欠陥を疑う。
+    heuristic_detector_limitation: str | None = None
     # 非 None のとき、デフォルトの policy.yaml ではなくこのパス（my_project/ からの相対）を
     # ロードする。回帰テスト専用ルールを配布用 policy.yaml に混在させないためのフィクスチャ差し替え。
     policy_file: str | None = None
@@ -88,6 +99,11 @@ class BenchmarkCase:
     # 呼ばずに fail-closed の三値化（#160）の下流（_compute_confidence の減点・
     # deny_scope_expansion_unjustified の non-match）を決定論的に検証する。
     force_scope_expansion_undetermined: bool = False
+    # True のとき、action_matches_intent_llm に UndeterminedActionMatchesIntentDetector を使う。
+    # 常に action_matches_intent=None（判定不能）にし、実 LLM を呼ばずに fail-closed の
+    # 三値化（#160 のパターンを #161 で踏襲）の下流——DENY 側（条件2・3、non-match）・ALLOW 側
+    # （条件5・8、non-match）・_compute_confidence の減点——を決定論的に検証する。
+    force_action_matches_intent_undetermined: bool = False
     note: str | None = None  # ケースの検証意図・素性の説明（ロジックには使わない）
 
 
@@ -109,9 +125,11 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
                 prior_actions=data.get("prior_actions", []),
                 expected_rule_id=data.get("expected_rule_id"),
                 known_regression_until=data.get("known_regression_until"),
+                heuristic_detector_limitation=data.get("heuristic_detector_limitation"),
                 policy_file=data.get("policy_file"),
                 pipeline_only=data.get("pipeline_only", False),
                 force_scope_expansion_undetermined=data.get("force_scope_expansion_undetermined", False),
+                force_action_matches_intent_undetermined=data.get("force_action_matches_intent_undetermined", False),
                 note=data.get("note"),
             ))
     return cases
@@ -187,6 +205,13 @@ def run_case(
         scope_expansion_llm = UndeterminedScopeExpansionDetector()
     else:
         scope_expansion_llm = None if (case.pipeline_only and pipeline_enabled) else NullScopeExpansionDetector()
+    # action_matches_intent も同じ gating。NullActionMatchesIntentDetector は「検出なし固定」
+    # ではなく旧文字列マッチヒューリスティックに委譲するため、デフォルト実行の
+    # action_matches_intent 依存ケースの挙動は変わらない（#161）。
+    if case.force_action_matches_intent_undetermined:
+        action_matches_intent_llm = UndeterminedActionMatchesIntentDetector()
+    else:
+        action_matches_intent_llm = None if (case.pipeline_only and pipeline_enabled) else NullActionMatchesIntentDetector()
     runtime = AARMRuntime(
         user_intent=case.user_intent,
         identity=identity,
@@ -195,6 +220,7 @@ def run_case(
         transform_registry=_TRANSFORM_REGISTRY,
         confidence_llm=confidence_llm,
         scope_expansion_llm=scope_expansion_llm,
+        action_matches_intent_llm=action_matches_intent_llm,
     )
     # 評価対象より前に同一セッションへ積む先行アクション（#143）。decision は見ない
     # （record_action は intercept() 内で policy 評価より前に走るため、privilege_scope で
@@ -328,17 +354,28 @@ def main() -> int:
         )
         # pipeline_only ケースは実 LLM の出力に依存し一発で安定しないことがあるため、
         # known_regression_until が無くても mismatch は fail ではなく informational 扱いにする
-        # （#112 Phase C）。
-        known_regression = (case.known_regression_until is not None or case.pipeline_only) and not ok
+        # （#112 Phase C）。heuristic_detector_limitation も同様に informational 扱いにするが、
+        # これは「いつか直る不具合」ではなく「ヒューリスティック検出層の恒久的な限界」を表す
+        # 別種の欠落（#161）。
+        known_regression = (
+            case.known_regression_until is not None
+            or case.pipeline_only
+            or case.heuristic_detector_limitation is not None
+        ) and not ok
 
         if ok:
             pass_count += 1
         elif known_regression:
             inform_count += 1
-            until = case.known_regression_until or "pipeline_only"
+            if case.known_regression_until is not None:
+                tag, tag_note = "until", case.known_regression_until
+            elif case.heuristic_detector_limitation is not None:
+                tag, tag_note = "heuristic_limitation", case.heuristic_detector_limitation
+            else:
+                tag, tag_note = "until", "pipeline_only"
             known_regression_mismatches.append(
                 f"{case.id} (expected={case.expected_decision}, actual={decision.value}, "
-                f"until={until})"
+                f"{tag}={tag_note})"
             )
         else:
             fail_count += 1
@@ -348,7 +385,10 @@ def main() -> int:
             if ok:
                 label = "✅"
             elif known_regression:
-                label = "🚧"
+                # 🚧 は「工事中＝いずれ直る」の意味であり、known_regression_until・pipeline_only
+                # （いずれ解消しうる一時的な不一致）には合うが、heuristic_detector_limitation
+                # （ヒューリスティック検出層の恒久的な限界、#161）には合わない。区別する。
+                label = "🧱" if case.heuristic_detector_limitation is not None else "🚧"
             else:
                 label = "❌"
             print(f"{label} Case: {case.id}")
@@ -380,7 +420,7 @@ def main() -> int:
     print(f"  pass:          {pass_count}")
     print(f"  fail:          {fail_count}")
     if inform_count:
-        print(f"  informational: {inform_count}  (known regressions, not counted as fail — see breakdown below)")
+        print(f"  informational: {inform_count}  (known regressions or heuristic detector limitations, not counted as fail — see breakdown below)")
     if skip_count:
         print(f"  skipped:       {skip_count}  (pipeline_only, use --pipeline — see breakdown below)")
     print(f"  total time:    {total_time:.2f}s")
@@ -397,7 +437,7 @@ def main() -> int:
             print(f"  - {case_id}")
 
     if known_regression_mismatches:
-        print("\nInformational — known regressions (tracked, not counted as fail):")
+        print("\nInformational — tracked mismatches, not counted as fail (known regressions or heuristic detector limitations):")
         for entry in known_regression_mismatches:
             print(f"  - {entry}")
 

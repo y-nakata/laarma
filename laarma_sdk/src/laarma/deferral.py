@@ -45,7 +45,7 @@ You receive:
 - user_intent: the user's original request
 - recent_actions: prior actions in this session
 - derived_signals: per-step signal values (δ) — data_classification, semantic_distance
-  (this step's embedding-cosine scalar), scope_expansion_detected
+  (this step's embedding-cosine scalar), scope_expansion
 - drift_observation: intent-drift tracking derived from the distance history —
   average, max, recent_avg, drift_trend (current - average), and history (the raw
   distance series)

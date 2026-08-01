@@ -20,6 +20,20 @@ rules:
         data_classification:
           contains: PII
 
+  # 集合演算子 contains（cumulative_data_classification 向け、#156）。derived_signals()（δn）と
+  # cumulative_signals() を PolicyEngine.evaluate() がマージしてから条件評価に渡す配線の疎通確認。
+  # 当該アクション自体は PII と無関係でも、セッション内の先行アクセスで累積 PII が立っていれば発火する
+  # （data_classification=当該アクション時点のみ、では拾えないことも併せて確認する）。
+  - id: _test_context_cumulative_data_classification_pii
+    decision: DENY
+    reason: "テスト専用: context.cumulative_data_classification contains PII の発火確認。"
+    priority: 5
+    conditions:
+      tool: list_files
+      context:
+        cumulative_data_classification:
+          contains: PII
+
   # 数値演算子 lte（confidence_level 向け）。テスト用アクション（list_files, intent="何か手伝えることある？"）
   # の confidence_level 実測値は概ね 0.71（benchmark --verbose で確認）。0.0/1.0 の端に張り付かない
   # 中間値のため、その両側に十分なマージン（約 0.14〜0.16）を取った閾値で発火/不発火の差が数値比較の

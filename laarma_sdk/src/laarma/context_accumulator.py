@@ -202,27 +202,42 @@ class ContextAccumulator:
 
         各キーは「このアクション時点の signal 値」であり、Cn に積まれて履歴になることに
         意味がある（式2）。semantic_distance は式4 の埋め込みコサイン単一スカラー
-        （そのステップの距離）。集計・トレンド系（平均・最大・ドリフト傾向・距離履歴列）は
-        δn に含めない——それらは δn 各ステップ値ではなく、蓄積済みの距離一次列に対する
-        導出観測であり、履歴として溜める意味がないため drift_observation() に分離する。
+        （そのステップの距離）。集計・トレンド・累積系（平均・最大・ドリフト傾向・距離履歴列・
+        セッション累積の data_classification・scope_expansion 等）は δn に含めない——それらは
+        δn 各ステップ値ではなく、蓄積済みの履歴に対する導出観測であり、履歴として溜める意味が
+        ないため drift_observation()・cumulative_signals() に分離する（#156）。
         """
         d = self._semantic_distances
         c = self._confidence_history
         current_confidence = c[-1] if c else 1.0
         m = self._action_matches_intent
+        se = self._scope_expansions
         p = self._confidence_llm_penalties
         det = self._confidence_llm_details
         return {
-            "data_classification":         sorted(set(self._data_classification)),
-            "current_data_classification": sorted(set(self._current_data_classification)),
-            "semantic_distance":           d[-1] if d else 0.0,
-            "scope_expansion_detected":    any(self._scope_expansions),
-            "scope_expansion_recent":      any(self._scope_expansions[-self._DRIFT_WINDOW:]),
-            "action_matches_intent":       m[-1] if m else False,
-            "entity_set":                  sorted(self._entity_set),
-            "confidence_level":            current_confidence,
-            "confidence_llm_penalty":      p[-1] if p else 0.0,
-            "confidence_llm_detail":       det[-1] if det else None,
+            "data_classification":   sorted(set(self._current_data_classification)),
+            "semantic_distance":     d[-1] if d else 0.0,
+            "scope_expansion":       se[-1] if se else False,
+            "action_matches_intent": m[-1] if m else False,
+            "entity_set":            sorted(self._entity_set),
+            "confidence_level":      current_confidence,
+            "confidence_llm_penalty": p[-1] if p else 0.0,
+            "confidence_llm_detail": det[-1] if det else None,
+        }
+
+    def cumulative_signals(self) -> dict:
+        """
+        δ のうちセッション全体に対する累積・集計view。δn（derived_signals()）とは別枠（#156）。
+
+        AARM 論文の `context.data_classification CONTAINS "PII"`（`block_external_after_pii` 例）
+        のような、蓄積された文脈 C に対するクエリに相当する値をここに置く。δn 自身は「このアクション
+        時点の値」であり、累積はその定義に含まれない（drift_observation() が semantic_distance の
+        集計・トレンドを δn から分離しているのと同じ理由）。
+        """
+        return {
+            "cumulative_data_classification": sorted(set(self._data_classification)),
+            "scope_expansion_detected":       any(self._scope_expansions),
+            "scope_expansion_recent":         any(self._scope_expansions[-self._DRIFT_WINDOW:]),
         }
 
     def drift_observation(self) -> dict:
@@ -256,5 +271,6 @@ class ContextAccumulator:
             "recent_actions":  self.recent_actions(n=5),
             "receipt_count":   len(self._receipts),
             "derived_signals": self.derived_signals(),
+            "cumulative_signals": self.cumulative_signals(),
             "drift_observation": self.drift_observation(),
         }

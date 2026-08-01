@@ -100,7 +100,8 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 | priority | 決定 | 帯の意味 | 現存ルール |
 |---|---|---|---|
 | 1000 | DENY | Forbidden（δ 非参照の静的 DENY・不可侵最上位） | `deny_critical_file_delete_in_prod` |
-| 900 | DENY | 意図整合性 DENY（`semantic_distance`・`action_matches_intent`・`scope_expansion` 参照） | `deny_intent_mismatch_destructive` / `deny_scope_expansion_unjustified` |
+| 910 | DENY | 意図整合性 DENY・特定状況の詳細化（`scope_expansion` を伴う） | `deny_scope_expansion_unjustified` |
+| 900 | DENY | 意図整合性 DENY・包括土台（`semantic_distance`・`action_matches_intent` 参照） | `deny_intent_mismatch_destructive` |
 | 800 | DENY | 文脈依存 DENY（組織固有 DENY 用に予約） | （なし） |
 | 710 | DEFER | カスタム DEFER の詳細化・穴あけ | `production_delete_defer` |
 | 700 | DEFER | confidence 包括土台 | `defer_low_confidence` |
@@ -112,10 +113,11 @@ MODIFY を terminal にしてよい根拠: 以前 MODIFY を terminal にしな�
 - **Forbidden(1000)**: `environment_type`（静的環境で AARM の C ではない）と path（`action.param`）のみ参照する δ 非参照の静的 DENY なので、Forbidden 帯の定義に合致する。
 - **意図整合性 DENY(900) が STEP_UP(600)・MODIFY(500) を覆す**。距離大の PII 削除で DENY と STEP_UP が同値 priority 100 だったバグ（#129 issuecomment-4971920088）を帯分離で解消。意図逸脱な write が MODIFY で黙って basename 化される「変換を伴った fail-open」も 900 > 500 で回避される。
 - **DEFER 帯を 710/700 に分ける**のは、`production_delete_defer`（特定状況に限定）を `defer_low_confidence`（包括土台）より上に置き、どちらの reason を出すかを priority で明示するため（YAML 記述順という別軸に依存させない）。両者は同時発火しても両方 DEFER なので competition しない。
+- **意図整合性 DENY 帯も同じ理由で 910/900 に分ける**（#161）。当初 条件2・条件3 は共に 900 だったが、条件2 のツール制限撤廃（#161）により両者が同一アクション（scope_expansion を伴う意図逸脱）に同時該当するようになった。DEFER 帯と同じ「特定状況の詳細化（条件3、scope_expansion 限定）を包括土台（条件2、意図逸脱一般）より上に置く」原則を適用し、`deny_scope_expansion_unjustified` を 910 に上げた。両者は同時発火しても両方 DENY なので competition しない。
 - **ctx-ALLOW 帯(100番台)も同様に細分化する**（#142 パス2 総点検）。より具体的で情報量の多い許可理由が優先して出るよう並べる: 140=`allow_destructive_explicit_high_confidence`（条件8）/ 130=`allow_action_matches_intent`（条件5）・`allow_information_gathering`（条件12前半）/ 120=`allow_low_semantic_distance`（条件6）/ 110=`allow_no_sensitive_data`（条件7）。条件7「PII/CONFIDENTIAL を含まない」はほぼ全アクションにマッチする最も消極的な理由のため最下位に置く。条件5〜8・条件12前半とも実装済み（#142）。
 - **帯は幅を持つ**（例: 700 番台・100 番台）。帯どうしの順序が骨格で、帯内の刻みは詳細化の表現。
 - **800（文脈依存 DENY）は現状該当ルールなしの予約帯**。
-- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）・条件3（`scope_expansion` かつ `action_matches_intent=false` の DENY）は意図整合性 DENY 帯(900)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に実装済み（いずれも #142）。
+- 条件2（`action_matches_intent=false` かつ `semantic_distance>0.4` の破壊/書込 DENY）は意図整合性 DENY 包括土台帯(900)、条件3（`scope_expansion` かつ `action_matches_intent=false` の DENY）は同帯の特定状況の詳細化(910、#161)、条件14（本番 + destructive の STEP_UP）は STEP_UP 帯(600)に実装済み（いずれも #142）。
 
 ---
 
@@ -134,7 +136,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 |---|---|---|---|
 | 1 | DENY | 意図と矛盾/無相関（読めと言われ write/delete） | 単一の δ 信号に写像しない（`action_matches_intent` より広い意味論的判断のため）。独立した包括 DENY ルールは作らず、意味論的整合の判断は整合信号（**#128**）に委ねる。原文が write/delete 両方をカバーする点（既存ルールの `write_file` 抜け）は条件2 のルールで補完（整合信号は #161 で `action_matches_intent` の LLM 化に統合された。別信号ではなく1信号で担う） |
 | 2 | DENY | `action_matches_intent=false` **かつ** `semantic_distance>0.4` の破壊/書込 | `deny_intent_mismatch_destructive`（DENY・900）。既存 `deny_intent_mismatch_delete` を置換。既存の `distance>0.64` 単独条件は、AND ゲートを落とした代償に閾値を吊り上げた近似で原文にない値のため、0.4 に戻して `action_matches_intent=false` との AND を復元し、`write_file`/destructive 群へ拡張する（対象ツールは #161 で `read_file`/`list_files` を `none_of` で除外した上でさらに拡張。詳細は §「δ 参照の記法」の `action_matches_intent` 節） |
-| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・900）。`no justification` を `action_matches_intent=false` で近似。当該アクション時点の `scope_expansion` を参照する（累積の `scope_expansion_detected` ではない。累積を参照すると一度スコープ外アクセスが起きたセッションでは以降無関係なアクションまで DENY し続ける取り違えになる。#143 と同型のバグで #156 で是正）。`scope_expansion` の産出手段は `scope_expansion_llm.py` の `ScopeExpansionDetector`（LLM 判定、**#99** で実装済み）——旧実装（"send"/"email" の部分文字列マッチ）は日本語 user_intent を一切読めない多言語破綻を持っていた。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
+| 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・910、条件2 との priority 分離は #161）。`no justification` を `action_matches_intent=false` で近似。当該アクション時点の `scope_expansion` を参照する（累積の `scope_expansion_detected` ではない。累積を参照すると一度スコープ外アクセスが起きたセッションでは以降無関係なアクションまで DENY し続ける取り違えになる。#143 と同型のバグで #156 で是正）。`scope_expansion` の産出手段は `scope_expansion_llm.py` の `ScopeExpansionDetector`（LLM 判定、**#99** で実装済み）——旧実装（"send"/"email" の部分文字列マッチ）は日本語 user_intent を一切読めない多言語破綻を持っていた。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
 | 4 | DENY | Compositional Risk（アクション系列が攻撃ベクトル） | **移植対象外**。判定する信号が δ になく決定論ルールに落ちない。将来対応は **#100**（危険性軸の拡張）。FRAMEWORK 章の DEFER 記述と重なるが、帰属先は DEFER でなく危険性軸（§4） |
 | 5 | ALLOW | `action_matches_intent=true` または要求が対象を明示 | `allow_action_matches_intent`（ALLOW・ctx-ALLOW 帯・priority 130）。原文の OR 後半は `action_matches_intent` の定義そのものなので前半に吸収 |
 | 6 | ALLOW | `semantic_distance < 0.3` | `allow_low_semantic_distance`（ALLOW・ctx-ALLOW 帯・priority 120）。条件2 の `>0.4` との間の 0.3〜0.4 は明示基準なしで空ける（原設計も同帯に基準を持たない） |
@@ -228,7 +230,7 @@ scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の D
 `null` は `ScopeExpansionDetector`（LLM 判定）の呼び出し自体が失敗した（例外・応答形式不正）ことを
 表し、「LLM が判定した結果 scope_expansion ではない」（`false`）とは区別される。`_match_context_predicate`
 は値が `None` の述語を安全側（不一致）として扱う既存の設計（#112 Phase B0）により、`scope_expansion:
-true` を条件とする `deny_scope_expansion_unjustified`（DENY・900・terminal）は `null` では発火しない
+true` を条件とする `deny_scope_expansion_unjustified`（DENY・910・terminal）は `null` では発火しない
 ——判定不能な状態から、回復不能な terminal DENY へ断定的に倒すことを避ける。代わりに `null` は
 `_compute_confidence()` の減点（`_SCOPE_EXPANSION_UNDETERMINED_PENALTY`）として confidence 側に反映され、
 `defer_low_confidence`/`step_up_low_confidence` を経由して人間の判断に委ねられる（`confidence_llm.py`

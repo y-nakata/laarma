@@ -13,7 +13,9 @@
 # 大小に対応させる。異なる decision は異なる帯に置く——同一 priority で decision が割れると
 # R3(b) の competition で terminal DEFER に落ちるため）:
 #   1000       Forbidden（δ 非参照の静的 DENY・不可侵最上位）
-#    900       意図整合性 DENY（semantic_distance 参照）
+#    900 番台  意図整合性 DENY（900=action_matches_intent/semantic_distance 参照の包括土台、
+#              910=scope_expansion を伴う特定状況の詳細化。700番台 DEFER と同じ「包括土台の上に
+#              特定状況の詳細化を積む」構造、#161）
 #    800       文脈依存 DENY（組織固有 DENY 用に予約・現状該当ルールなし）
 #    700 番台  DEFER（700=confidence 包括土台、710 以上=カスタム DEFER の詳細化・穴あけ）
 #    600       STEP_UP
@@ -160,9 +162,16 @@ rules:
   # では以降無関係なアクションまで DENY し続ける取り違えになる（#143 と同型のバグ、#156 で是正）。
   # semantic_distance は絡めない（条件2 と異なり、意図整合の信号同士の掛け合わせに留める）。
   # tool は非限定（external_tools に限らず scope_expansion を見るツール全般が対象）。
+  #
+  # priority 910（条件2 の 900 より上）。#161 で条件2 のツール制限を撤廃した結果、scope_expansion
+  # を伴う DENY（webhook 等）は条件2・条件3 の両方に該当するようになり、同一 priority(900) では
+  # どちらの reason が勝つかが YAML 記述順という別軸に依存していた。#129 が DEFER 帯を 710/700 に
+  # 分けた原則（特定状況に限定したルールを、包括的な土台ルールより上位 priority に置き、勝者を
+  # priority で明示する）をここにも適用する——scope_expansion という特定状況（条件3）は、意図逸脱
+  # 一般という包括土台（条件2）より上位に置く。
   - id: deny_scope_expansion_unjustified
     decision: DENY
-    priority: 900
+    priority: 910
     reason: "ユーザーの意図で正当化されないスコープ外アクセスを検出したため拒否しました。"
     conditions:
       context:

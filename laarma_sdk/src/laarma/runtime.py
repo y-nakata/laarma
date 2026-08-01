@@ -41,13 +41,14 @@ class AARMRuntime:
         transform_registry: "dict[str, Any] | None" = None,
         confidence_llm: Any | None = None,
         scope_expansion_llm: Any | None = None,
+        action_matches_intent_llm: Any | None = None,
     ) -> None:
         self._identity    = identity
         self._environment = environment
         _policy           = policy or DEFAULT_POLICY
         self._accumulator = ContextAccumulator(
             user_intent=user_intent, metadata=metadata, policy=_policy, confidence_llm=confidence_llm,
-            scope_expansion_llm=scope_expansion_llm)
+            scope_expansion_llm=scope_expansion_llm, action_matches_intent_llm=action_matches_intent_llm)
         self._policy_engine = PolicyEngine(
             policy=_policy,
             transform_registry=transform_registry,
@@ -133,12 +134,14 @@ class AARMRuntime:
     def _finalize(self, result: AuthorizationResult) -> AuthorizationResult:
         """receipt_hash を封緘してから記録・ログする単一経路。鍵を知るのはここだけ。"""
         # #112 Phase C: confidence LLM 検出層の減点幅・検出理由を受領書に写す。#99: scope_expansion
-        # LLM 検出層の検出理由も同様に写す。DEFER/STEP_UP 解決後の呼び出しでも record_action() は
-        # 再実行されないため、この時点の derived_signals は元アクションのものがそのまま有効。
+        # LLM 検出層の検出理由、#161: action_matches_intent LLM 検出層の検出理由も同様に写す。
+        # DEFER/STEP_UP 解決後の呼び出しでも record_action() は再実行されないため、この時点の
+        # derived_signals は元アクションのものがそのまま有効。
         derived = self._accumulator.summary().get("derived_signals", {})
         result.confidence_llm_penalty  = derived.get("confidence_llm_penalty")
         result.confidence_llm_detail   = derived.get("confidence_llm_detail")
         result.scope_expansion_detail  = derived.get("scope_expansion_detail")
+        result.action_matches_intent_detail = derived.get("action_matches_intent_detail")
         result.seal(self._receipt_secret)
         self._accumulator.record_result(result)
         self._log(result)

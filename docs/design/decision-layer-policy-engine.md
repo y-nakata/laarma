@@ -400,8 +400,8 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証は未了。
 - **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、composite risk（#100）。
-  δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。priority 体系化（#129）はクローズ済み、
-  scope_expansion の LLM 検出層（#99）は実装済み。
+  δ 参照ポリシーは本リファクタ内で段階実装（旧 #107 吸収）。priority 体系化（#129）はクローズ済み。
+  scope_expansion の LLM 検出層（#99）は実装済み（PR #159、未クローズ）。
 
 ---
 
@@ -412,4 +412,4 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
 - 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（本リファクタが触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
-- 関連 Issue: #112（本設計の実装。#94 後継。クローズ済み）、#94（signal/decision 分離。#112 に立て直し・not_planned クローズ）、#107（δ 参照拡張。#112 に吸収・not_planned クローズ）、#99（scope_expansion の LLM 検出層。実装済み）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）
+- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層。実装は PR #159、未クローズ）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

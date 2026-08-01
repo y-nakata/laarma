@@ -237,7 +237,8 @@ normative に規定するものではない（詳細は [classification-and-poli
 配下の無印は当該アクション時点の値、累積は別名（`cumulative_` 接頭辞または `_detected`/`_recent`
 接尾辞）に切り出す方針に統一した。
 
-`derived_signals()` が返す残り（`entity_set` / `confidence_llm_penalty` / `confidence_llm_detail`）は、
+`derived_signals()` が返す残り（`entity_set` / `confidence_llm_penalty` / `confidence_llm_detail` /
+`scope_expansion_detail`）は、
 参照するルールの当てがつくまで開放しない（#140 のアンカー YAGNI と同じ判断軸、#141）。
 
 `scope_expansion_detected` / `scope_expansion_recent` の産出手段も `scope_expansion` と同じ

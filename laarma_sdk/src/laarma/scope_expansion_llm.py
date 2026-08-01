@@ -117,6 +117,11 @@ class ScopeExpansionDetector:
             (is_scope_expansion, reason) — external_tools に含まれないツールは LLM を呼ばず
             即座に (False, None) を返す（scope_expansion の定義上、外部送信/外部アクセス系
             ツールでなければ想定スコープ外にはなりえない）。
+
+            fail-closed 時は scope_expansion=True を返す。これは deny_scope_expansion_unjustified
+            （DENY・900・terminal）に直行しうる——confidence_llm.py の fail-closed が DEFER/STEP_UP
+            に着地し人間承認や DeferralResolver で回復できるのと非対称（#160 で可用性の姿勢として
+            検討中。安全側に倒す現状の設計自体は誤りではないが、意図した仕様として確定してはいない）。
         """
         if tool_name not in external_tools:
             return (False, None)

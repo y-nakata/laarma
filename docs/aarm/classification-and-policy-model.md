@@ -117,6 +117,12 @@ priority: 100
 
 したがって、Forbidden と context 依存の分類の構造的な差は **「match predicate が context (C) を参照するか、action (a) だけを見るか」** である。Forbidden は action のみを見る（だから "context evaluation を要しない" = "Ignored"）。context 依存の各分類は context を見る。priority も差を示唆する（forbidden の例は 1000、ctx-deny の例は 100 と、forbidden 帯が高い）。
 
+### 【解釈】`block_external_after_pii` の match predicate は informative な例示であり、field 名・累積性を normative に規定しない
+
+`context.data_classification CONTAINS "PII"` という記法は、この節（§IV PROBLEM FORMALIZATION）の informative な例示の一部である。`docs/aarm/deferral.md` が確立した読み方（FRAMEWORK 章のような narrative な記述は informative、CONFORMANCE 章 R3 のような検証可能な記述が normative——ISO/IEC Directives Part 2・W3C QA Framework に基づく標準的な二層構造）に照らすと、§IV の具体例も同じ扱いで読むのが一貫している。laarma が準拠すべき MUST 要件は「CSA版」の R1〜R9（R2: `Cn = Cn-1 ∪ {an, on, δn}` の維持、など）であり、`context.data_classification` というフィールド名や、その値がセッション累積かどうかという実装の詳細は、この1つの例示が規定するものではない。
+
+上記の「Forbidden と context 依存の境界」という解釈（match predicate が context を参照するか否か）はこの区別と独立に成り立つ——参照する対象が何であれ「context を参照している」という構造自体が論点だからである。したがってこの解釈は影響を受けない。影響を受けるのは、`context.data_classification` というフィールドの**中身**（当該アクション時点の値か、セッション累積か）を実装する際に、この例示を根拠に一意に決められると考えることである。laarma の実装（`derived_signals()` の signal 設計）は、この例示を参考にはするが、それ自体を規定根拠にはしない（詳細は [decision-layer-policy-engine.md](../design/decision-layer-policy-engine.md)）。
+
 ### 【解釈】「DENY を書くと Forbidden になる」は誤り——DENY baseline は明示ポリシー
 
 過去の laarma の議論で「静的ポリシーで DENY を書くと、それは Forbidden ルールになってしまう。したがって Context-Dependent Allow の "Policy Baseline: DENY" は、明示的な DENY ポリシーではなく、ALLOW ポリシーにマッチしない裏側の暗黙のデフォルト DENY 状態だ」という解釈があった。**これは誤りであり、本メモで覆す。**

@@ -273,6 +273,21 @@ DENY(900) は ALLOW(130) に優先するため、`action_matches_intent` の精�
 対象として条件2 から除外する。非破壊アクションの意図逸脱検知（#128 が本来の射程とした
 drift/hijack 検知）は read_file/list_files 以外のツール（`webhook`・`database` 等）で機能する。
 
+この対象範囲は、旧 IntentAlignment の条件12後半（原文 "reserve DEFER/DENY for the actual
+destructive or write action where the risk materializes"）の原則を一般化したものでもある。
+原文は文法上「破壊/書込アクション」への適用に限定して読めるが、本設計はこれを「risk が
+materialize しない無害な準備ステップ（情報収集）では介入せず、実際にリスクが生じるアクションで
+介入する」という原則へ意図的に一般化した TO BE の判断として採用する（#165）。条件2 の対象は
+ツール名の値そのものであり、`my_project/tools.py` の実装有無とは無関係に判定する。`tools.py` が
+実装する5つのツール（`read_file`/`write_file`/`list_files`/`delete_file`/`drop_database`）は、
+破壊/書込（`write_file`/`delete_file`/`drop_database`）と情報収集（`read_file`/`list_files`）の
+いずれかにきれいに分かれるため、`tools.py` の範囲では一般化の前後で DENY 対象が変わらない
+（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定する）。一般化が判定を
+変えるのは、破壊/書込でも情報収集でもない性質のツール（例: 外部送信、機微データへの読み取り専用
+クエリ）に対してであり、そのようなツールは `tools.py` にまだ実装されていない。`database`/`webhook`
+等、`benchmark_data.jsonl` が `Action` を直接構築して使う擬似ツール名がこの性質を代表しており、
+一般化の効果は `my_project/benchmark.py` で既に検証されている。
+
 `derived_signals()`（δn）はどの信号も「このアクション時点の値のみ」を持つという契約に統一されている
 （`4465e40` で確立、`4465e40` の取りこぼしにより `scope_expansion` 系だけこの契約に反していたのを
 #156 で是正）。累積・集計系（`cumulative_signals()`・`drift_observation()`）は δn そのものではなく、
@@ -436,31 +451,9 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - **条件1〜15 の状況（全15条件の移植完了、#142）**: 条件2・3・5・6・7・8・13・14・12前半は明示
   ポリシールールとして実装済み（上記）。「baseline ALLOW で自然に出るため専用ルール不要」という
   従前の判断は、非重複が無検証・明示性の喪失・将来衝突の非検知の3点で誤りと確定し（#139）、
-  条件5〜8 の明示 ALLOW 化で解消した。条件12後半（原文 "reserve DEFER/DENY for the actual
-  destructive or write action where the risk materializes"）は ALLOW ルール化の対象外だが、
-  その原則は条件2 の設計に反映する。原文は文法上「破壊/書込アクション」への適用に限定して読めるが、
-  本設計はこれを「risk が materialize しない無害な準備ステップ（情報収集）では介入せず、実際に
-  リスクが生じるアクションで介入する」という原則へ意図的に一般化した TO BE の判断として採用する
-  （#165）。旧条件2 の `destructive_tools`/`write_file` 限定は、当時の `action_matches_intent`
-  ヒューリスティックの精度不足による暫定的な制約であり（#128 issuecomment-5151069908）、条件2 の
-  ツール制限撤廃（`read_file`/`list_files` のみ `none_of` 除外、#161）はこの一般化の実装である。
-
-  条件2 の対象はツール名の値そのものであり、`my_project/tools.py` の実装有無とは無関係に判定する。
-  `tools.py` が実装する5つのツール（`read_file`/`write_file`/`list_files`/`delete_file`/
-  `drop_database`）は、破壊/書込（`write_file`/`delete_file`/`drop_database`）と情報収集
-  （`read_file`/`list_files`）のいずれかにきれいに分かれる。破壊/書込側は旧条件2（`destructive_tools`/
-  `write_file` 限定）でも一般化後の条件2 でも同じく DENY 対象であり、情報収集側は `none_of` で
-  両方とも除外されている。つまり `tools.py` の範囲では、一般化の前後でどのツールが DENY 対象に
-  なるかは変わらない（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定
-  するため、実際には条件2 自体が関与しない）。
-
-  一般化が判定を変えるのは、破壊/書込でも情報収集でもない性質のツール（例: 外部送信、機微データ
-  への読み取り専用クエリ）に対してだが、そのようなツールは `tools.py` にまだ実装されていない。
-  `database`/`webhook` 等、`benchmark_data.jsonl` が `Action` を直接構築して使う擬似ツール名が
-  この性質を代表しており、一般化の効果は `my_project/benchmark.py` で既に検証されている。`tools.py`
-  に同種のツールの実装が追加された場合も、同じ判定がそのまま適用される。
-
-  条件1（単一信号に写像不可な意味論的
+  条件5〜8 の明示 ALLOW 化で解消した。条件12後半（介入点は risk が materialize するアクション、
+  という原則）は ALLOW ルール化の対象外だが、その原則は条件2 の対象範囲に反映されている（詳細は
+  §「δ 参照の記法」の `action_matches_intent` 節、#165）。条件1（単一信号に写像不可な意味論的
   整合の判断）は整合信号として #128 が仮決めし、その
   産出手段を `action_matches_intent` の LLM 化（#161）に統合したことで解消した（別信号を新設せず、
   条件2・3 が参照する `action_matches_intent` 自体がこの判断を担う）。条件4 は別 Issue の穴

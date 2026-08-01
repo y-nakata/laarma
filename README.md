@@ -26,25 +26,34 @@ laarma/
 ├── laarma_sdk/        # laarma パッケージ（AARM SDK）
 │   ├── pyproject.toml   # pip install -e laarma_sdk
 │   └── src/laarma/
-│       ├── models.py              # データモデル (R1〜R6)
-│       ├── context_accumulator.py # コンテキスト蓄積 (R2)
-│       ├── deferral.py            # DEFER ワークフロー解決
-│       ├── step_up_resolver.py    # STEP_UP 人間承認ワークフロー
-│       ├── environment.py         # 環境コンテキスト定義
-│       ├── policy_engine.py       # ポリシー評価 (R3) — 式(3) の π・priority 解決エンジン
-│       ├── policy_loader.py       # 静的ポリシー定義の読み込み (YAML/JSON)
-│       ├── runtime.py             # R1〜R6 統合
-│       └── tool_proxy.py          # SDK Instrumentation 層
+│       ├── models.py                     # データモデル (R1〜R6)
+│       ├── context_accumulator.py        # コンテキスト蓄積 (R2)
+│       ├── distance_calculator.py        # semantic_distance の埋め込み計算 (式4)
+│       ├── confidence_llm.py             # confidence LLM 検出層（意味論的曖昧さ・矛盾の検出）
+│       ├── scope_expansion_llm.py        # scope_expansion の LLM 判定
+│       ├── action_matches_intent_llm.py  # action_matches_intent の LLM 判定
+│       ├── deferral.py                   # DEFER ワークフロー解決
+│       ├── step_up_resolver.py           # STEP_UP 人間承認ワークフロー
+│       ├── environment.py                # 環境コンテキスト定義
+│       ├── policy_engine.py              # ポリシー評価 (R3) — 式(3) の π・priority 解決エンジン
+│       ├── policy_loader.py              # 静的ポリシー定義の読み込み (YAML/JSON)
+│       ├── runtime.py                    # R1〜R6 統合
+│       ├── tool_proxy.py                 # SDK Instrumentation 層
+│       ├── audit.py                      # receipt_hash 計算（改ざん検知）
+│       └── _text_sanitize.py             # LLM プロンプトへの入力サニタイズ共通処理
 │
 └── my_project/        # エージェント実装例（laarma SDK を使う側）
-    ├── agent.py         # エージェントループ（laarma を知らない）
-    ├── tools.py         # ツール定義・実装（laarma を知らない）
-    ├── demo.py          # デモエントリーポイント
-    ├── benchmark.py     # ベンチマークランナー
+    ├── agent.py             # エージェントループ（laarma を知らない）
+    ├── tools.py             # ツール定義・実装（laarma を知らない）
+    ├── demo.py              # デモエントリーポイント
+    ├── demo_output_sample.txt # demo.py 実行例の出力サンプル
+    ├── benchmark.py         # ベンチマークランナー
     ├── benchmark_data.jsonl
-    ├── identity_keys.py # R6: Human/Agent/Service の Ed25519 鍵生成・読み込み（デモ用・第1段階）
+    ├── identity_keys.py     # R6: Human/Agent/Service の Ed25519 鍵生成・読み込み（デモ用・第1段階）
     └── policies/
-        └── policy.yaml  # 静的ポリシー定義
+        ├── policy.yaml         # 静的ポリシー定義
+        ├── policy.schema.json  # policy.yaml の JSON Schema
+        └── _fixtures/          # benchmark 専用の回帰テストポリシー（配布用 policy.yaml とは分離）
 ```
 
 ### 層の分離

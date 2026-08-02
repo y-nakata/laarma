@@ -22,5 +22,6 @@ python my_project/demo.py
 | `AARM_RECEIPT_SECRET` | — | receipt_hash の HMAC-SHA256 署名鍵。未設定時は警告のみ（フォールバック: 鍵なし SHA-256）。詳細は [AUDIT.md](AUDIT.md) |
 | `AARM_IDENTITY_PUBKEY_DIR` | — | Human/Agent/Service の Ed25519 公開鍵（`{principal}.pub`）を置くディレクトリ。未設定時は identity 署名検証をスキップ（警告のみ）。詳細は [AUDIT.md](AUDIT.md) |
 | `HF_TOKEN` | — | Hugging Face 認証トークン。設定すると HF Hub への認証済みリクエストになり未認証警告が消える（未設定でもダウンロード・動作は可能） |
+| `AARM_DEMO_DETERMINISTIC_SAMPLE` | — | `my_project/demo.py` 専用（laarma_sdk 本体には無関係）。`1` を設定すると `confidence_llm`（`SemanticAmbiguityDetector`）を `NullConfidenceLLM` に差し替え、低確率の誤検知による decision の揺れを止める。`my_project/demo_output_sample.txt`（参照出力）の再生成時のみ使う想定で、通常のデモ実行では設定しない |
 
 `ANTHROPIC_API_KEY` は `AARMRuntime` をデフォルト構成（`confidence_llm` 未指定）のまま使う限り実質必須である。confidence の LLM 検出層（`SemanticAmbiguityDetector`, #112 Phase C）は毎アクション LLM を呼ぶ設計のため、`ANTHROPIC_API_KEY` 未設定のまま使うと毎アクションで LLM 呼び出しが失敗し、fail-closed で confidence が常時大きく減点される（`_LLM_PENALTY=0.5`）。結果として STEP_UP/DEFER に倒れやすくなる——これは「LLM 不達時は confidence を下げる」という設計方針どおりの挙動であり、バグではない。

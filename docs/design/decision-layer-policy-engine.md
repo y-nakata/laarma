@@ -137,7 +137,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 | 1 | DENY | 意図と矛盾/無相関（読めと言われ write/delete） | 単一の δ 信号に写像しない（`action_matches_intent` より広い意味論的判断のため）。独立した包括 DENY ルールは作らず、意味論的整合の判断は整合信号（**#128**）に委ねる。原文が write/delete 両方をカバーする点（既存ルールの `write_file` 抜け）は条件2 のルールで補完（整合信号は #161 で `action_matches_intent` の LLM 化に統合された。別信号ではなく1信号で担う） |
 | 2 | DENY | `action_matches_intent=false` **かつ** `semantic_distance>0.4` の破壊/書込 | `deny_intent_mismatch_destructive`（DENY・900）。既存 `deny_intent_mismatch_delete` を置換。既存の `distance>0.64` 単独条件は、AND ゲートを落とした代償に閾値を吊り上げた近似で原文にない値のため、0.4 に戻して `action_matches_intent=false` との AND を復元し、`write_file`/destructive 群へ拡張する（対象ツールは #161 で `read_file`/`list_files` を `none_of` で除外した上でさらに拡張。詳細は §「δ 参照の記法」の `action_matches_intent` 節） |
 | 3 | DENY | scope_expansion 検出かつ意図に正当化なし | `deny_scope_expansion_unjustified`（DENY・910、条件2 との priority 分離は #161）。`no justification` を `action_matches_intent=false` で近似。当該アクション時点の `scope_expansion` を参照する（累積の `scope_expansion_detected` ではない。累積を参照すると一度スコープ外アクセスが起きたセッションでは以降無関係なアクションまで DENY し続ける取り違えになる。#143 と同型のバグで #156 で是正）。`scope_expansion` の産出手段は `scope_expansion_llm.py` の `ScopeExpansionDetector`（LLM 判定、**#99** で実装済み）——旧実装（"send"/"email" の部分文字列マッチ）は日本語 user_intent を一切読めない多言語破綻を持っていた。コメント起票時は「現状発火例なし」と想定していたが、実装時に既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）が該当すると判明し、STEP_UP から DENY に変わった（`deny_scope_expansion_unjustified_webhook` に改名。安全側への変化として受け入れ済み）。副作用として `step_up_low_confidence` のデフォルト実行（非 `--pipeline`）での決定論的発火例が失われた（詳細は §3「条件9/10」直後の段落参照） |
-| 4 | DENY | Compositional Risk（アクション系列が攻撃ベクトル） | **移植対象外**。判定する信号が δ になく決定論ルールに落ちない。将来対応は **#100**（危険性軸の拡張）。FRAMEWORK 章の DEFER 記述と重なるが、帰属先は DEFER でなく危険性軸（§4） |
+| 4 | DENY | Compositional Risk（アクション系列が攻撃ベクトル） | **移植対象外**。判定する信号が δ になく決定論ルールに落ちない。**#100** で危険性軸の拡張として検討していたが、脅威モデリングまたはラベル付き実行系列のデータセットが前提になり laarma の射程を超えるため、射程外として close 済み（§4 末尾）。FRAMEWORK 章の DEFER 記述と重なるが、帰属先は DEFER でなく危険性軸（§4） |
 | 5 | ALLOW | `action_matches_intent=true` または要求が対象を明示 | `allow_action_matches_intent`（ALLOW・ctx-ALLOW 帯・priority 130）。原文の OR 後半は `action_matches_intent` の定義そのものなので前半に吸収 |
 | 6 | ALLOW | `semantic_distance < 0.3` | `allow_low_semantic_distance`（ALLOW・ctx-ALLOW 帯・priority 120）。条件2 の `>0.4` との間の 0.3〜0.4 は明示基準なしで空ける（原設計も同帯に基準を持たない） |
 | 7 | ALLOW | PII/CONFIDENTIAL を含まない | `allow_no_sensitive_data`（ALLOW・ctx-ALLOW 帯・priority 110）。「含まない」は `none_of` で表現し、集合述語の否定形は新設しない。参照信号は当該アクション時点の `data_classification`——原文 `involved in the action` に従い、#142 起票時のコメント案（累積 `cumulative_data_classification`）から実装時に変更した。条件13 と同じ判断軸（#143）で、累積を使うと一度でも PII に触れたセッションでは以降本ルールが発火しなくなり、条件13 の対になる ALLOW としての相補性が崩れるため |
@@ -150,7 +150,7 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 | 14 | STEP_UP | 本番の高影響操作 | `step_up_production_destructive`（STEP_UP・600）。本番かつメンテナンス窓内かつ重要ファイル以外という、既存2ルール（`deny_critical_file_delete_in_prod`・`production_delete_defer`）が覆っていない領域を埋める |
 | 15 | STEP_UP | `confidence 0.4-0.6` かつ中程度リスク | **新規ルール不要**。既存 `step_up_low_confidence`（STEP_UP・600）が正しい形。`with moderate risk` は条件に書かない（危険性は evaluability の軸である confidence に混ぜない——§5）。#174 で条件12前半（`*information_gathering_tools`）を `none_of` で除外した点は条件12の行に記載の通り、本ルールにも同様に適用済み |
 
-移行先はおおむね次に分かれる: (1) δ・tool・環境を参照するポリシールール（条件 2,3,5,6,7,8,12前半,13,14,15）、(2) 別 Issue に委ねる（条件1=#128、条件4=#100）、(3) 既存ルールが既に正しい形で新規不要（条件10,15）、(4) 処遇不要・廃止（条件9,11=#137）。各条件の詳細な検討（ルール文案・他ルールとの非重複検証・実装順の制約）は #142。
+移行先はおおむね次に分かれる: (1) δ・tool・環境を参照するポリシールール（条件 2,3,5,6,7,8,12前半,13,14,15）、(2) 別 Issue に委ねる（条件1=#128）、(2') 射程外として実装しない（条件4=#100、close 済み）、(3) 既存ルールが既に正しい形で新規不要（条件10,15）、(4) 処遇不要・廃止（条件9,11=#137）。各条件の詳細な検討（ルール文案・他ルールとの非重複検証・実装順の制約）は #142。
 
 ### 条件9/10（confidence 低 → DEFER）: メカニズムと、条件2 実装後の scenario 8 の位置づけ
 
@@ -372,15 +372,33 @@ LLM 判定結果を、累積 `any()`/直近5件 `any()` として `cumulative_si
 - **(3) 不完全な履歴ゆえに不明な複合リスク** → 拾える DEFER が残らない。実装に下ろすと三筋に分解され、いずれも DEFER にならない:
   - (i) **履歴窓の不備**: 現行 IA が5履歴サマリしか LLM に渡さないため、email 送信時に先行 PII アクセスが見えず「不完全履歴で DEFER」となるのは、履歴窓を広げれば消える**実装の不備**であって FRAMEWORK 章の状況ではない。PII アクセスは C に蓄積される既知の事実で、これまでアクセスが無ければその時点の email 送信にリスクは無い。
   - (ii) **起きていない事実を待つ**: 「まだ起こっていないこと」に対し履歴が不完全だから DEFER、は待つべき対象が無く、未知の未知を DEFER するのと同じ不条理（`docs/aarm/deferral.md` §1）。
-  - (iii) **既知悪性パターンへの接近**: 「あと一手で既知の悪性パターンに完全一致しそうだから DEFER」は、DEFER する限りアクションが実行されずパターンは永久に完成しない——待つのでなく**止める（DENY）**べき。パターンが既知なら既知の**危険性**であり、DEFER（評価可能性）でなく危険性軸で扱う（#100 composite risk）。
+  - (iii) **既知悪性パターンへの接近**: 「あと一手で既知の悪性パターンに完全一致しそうだから DEFER」は、DEFER する限りアクションが実行されずパターンは永久に完成しない——待つのでなく**止める（DENY）**べき。パターンが既知なら既知の**危険性**であり、DEFER（評価可能性）でなく危険性軸で扱う（#100 composite risk。ただし #100 は射程外として close 済み——下記「composite risk を実装しない判断」参照）。
 
 - **(4) 安全性がセッション未取得情報に依存** → 参照先がポリシーに書けている既知の未知なら R3(a)（未 populate の context 参照）で捉わる。未知の未知（参照先を書けない）は DEFER の対象でなく DENY（`docs/aarm/deferral.md` §1）。なお laarma の同期モデルでは δ は評価前に必ず算出され「未 populate」が生じないため、R3(a) は現状非発生（並行/非同期実行を採れば発生しうる）。
 
-**まとめ**: 適合性は R3(a)(b)(c) で足りる。laarma が FRAMEWORK 章を超えて拾う設計選択のうち、実装できるのは (1) の組み合わせと (2a) 曖昧な意図（§5 の confidence-LLM 経由）に絞られる。(2b) の特定不能な矛盾と (3) 複合リスクは、拾おうとしても実装可能性・検証可能性・DEFER/DENY の区別の壁に当たり、DEFER として拾わない（該当する筋は決定論ポリシー・DENY・#100 に振り分ける）。したがって §5 の confidence 計算への LLM 活用は、「曖昧な意図」を評価可能性に反映する経路として設計に入れる（決定論で書ける矛盾はポリシーで、危険性は危険性軸で扱う、という境界は保つ）。
+**まとめ**: 適合性は R3(a)(b)(c) で足りる。laarma が FRAMEWORK 章を超えて拾う設計選択のうち、実装できるのは (1) の組み合わせと (2a) 曖昧な意図（§5 の confidence-LLM 経由）に絞られる。(2b) の特定不能な矛盾と (3) 複合リスクは、拾おうとしても実装可能性・検証可能性・DEFER/DENY の区別の壁に当たり、DEFER として拾わない（該当する筋は決定論ポリシー・DENY・危険性軸に振り分ける。うち危険性軸の composite risk は #100 で検討したが射程外として close 済み）。したがって §5 の confidence 計算への LLM 活用は、「曖昧な意図」を評価可能性に反映する経路として設計に入れる（決定論で書ける矛盾はポリシーで、危険性は危険性軸で扱う、という境界は保つ）。
 
 上記 (4) は論文解釈としては R3(a) に対応するが、laarma では R3(a) 自体を実装しない（§3「δ 参照の記法」
 参照）。laarma の同期モデルでは δ が評価前に必ず算出され「未 populate な context 参照」という状態が
 実行時に生じないため、決定論的な (4) の捕捉は R3(a) という機構を介さず構造的に成立する。
+
+### composite risk を実装しない判断（#100 を close）
+
+FRAMEWORK 章 (3) の三筋分解のうち (iii)「既知悪性パターンへの接近」は、DEFER でなく危険性軸
+（composite risk）に振り分けた。その受け皿だった #100 は、**射程外として close した**。
+
+理由は三つある。第一に、composite risk は CONFORMANCE 要件（R1〜R7）に含まれず、Table I の
+Compositional Risk も legacy SYSTEM_PROMPT の条件4 も informative 相当であり、実装しなくても
+AARM に conformant である。第二に、「どの系列が攻撃ベクトルか」を定義するには脅威モデリングか
+ラベル付き実行系列のデータセットによる学習が要り、AARM 仕様の理解を目的とする laarma の射程を
+超えてセキュリティ研究の領域に入る。第三に、§5「較正定数の棚卸し」で既存の暫定値の統計的較正
+（#77）すらデータセットが要るため行わないと判断しており、新規の信号を設計する本件はその前提を
+より強く満たさない。
+
+したがって laarma において**系列を跨ぐリスクは未カバーであり、今後もカバーしない**。これは
+気づいていない穴ではなく、明示的に塞がないと決めた穴である。将来この領域に着手する場合の
+出発点として、#100 に棚卸しした論点（脅威定義・信号充足性・検出単位とウィンドウ・決定への写像・
+状態依存検出の偽陽性と回復・TCB 境界）が参照できる。
 
 ### R3(c) の適用範囲: 情報収集系ツールの除外（#174）
 
@@ -525,7 +543,7 @@ confidence を構成する数値はここまでの実装で複数箇所に散ら
   整合の判断）は整合信号として #128 が仮決めし、その
   産出手段を `action_matches_intent` の LLM 化（#161）に統合したことで解消した（別信号を新設せず、
   条件2・3 が参照する `action_matches_intent` 自体がこの判断を担う）。条件4 は別 Issue の穴
-  （#100）。条件11 は廃止（#137）。
+  （#100。射程外として close 済み）。条件11 は廃止（#137）。
   条件9/10（confidence 低下 → DEFER のメカニズム自体）は #112 Phase C で実装済みで
   `step_up_semantic_contradiction_copy`（`--pipeline` 実行）で確認できる。当初の実演シナリオ
   だった旧デモシナリオ8「古いファイル」は、`action_matches_intent` が文字列包含ヒューリスティック
@@ -538,8 +556,9 @@ confidence を構成する数値はここまでの実装で複数箇所に散ら
   `step_up_low_confidence` で対応済み・新規ルール不要。
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証は未了。
-- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決層の LLM decision 除去（#135、旧 #89 を吸収）、
-  composite risk（#100）。δ 参照ポリシーは #112 で段階実装済み（旧 #107 吸収）。priority 体系化
+- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決層の LLM decision 除去（#135、旧 #89 を吸収）。
+  δ 参照ポリシーは #112 で段階実装済み（旧 #107 吸収）。composite risk（#100）は射程外として
+  close 済み。priority 体系化
   （#129）はクローズ済み。scope_expansion の LLM 検出層（#99）・fail-closed の三値化（#160）・
   action_matches_intent の LLM 検出層（#161、整合信号の統合含む、#128）は実装済み。confidence
   LLM 検出層の実演シナリオ（#150、`defer_ambiguous_intent_destructive_pipeline`）も実装済み。
@@ -555,4 +574,4 @@ confidence を構成する数値はここまでの実装で複数箇所に散ら
 - 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
 - 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（#112 が触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
-- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外の非対称を指摘。当時は根拠にした `database` が tools.py に実装のない擬似ツールだったため取り下げクローズしたが、#171 で `query_database` が実ツールになり前提が崩れたため、`none_of` への追加で改めて解消済み）、#172（execute_shell/execute_sql の denied_tools 化。#171 の指摘を受け destructive_tools 分類を撤回）、#150（confidence LLM 検出層の実演シナリオ）、#166（demo.py のナレーション乖離・DeferralResolver の事実誤認・temperature 未設定の是正）、#174（情報収集系ツールが confidence 低下由来の DEFER/STEP_UP に倒れる乖離。`information_gathering_tools` の一元化で解消）、#100（composite risk）、#77（confidence 較正）、#135（DEFER 解決層の LLM decision 除去、旧 #89 を吸収）
+- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外の非対称を指摘。当時は根拠にした `database` が tools.py に実装のない擬似ツールだったため取り下げクローズしたが、#171 で `query_database` が実ツールになり前提が崩れたため、`none_of` への追加で改めて解消済み）、#172（execute_shell/execute_sql の denied_tools 化。#171 の指摘を受け destructive_tools 分類を撤回）、#150（confidence LLM 検出層の実演シナリオ）、#166（demo.py のナレーション乖離・DeferralResolver の事実誤認・temperature 未設定の是正）、#174（情報収集系ツールが confidence 低下由来の DEFER/STEP_UP に倒れる乖離。`information_gathering_tools` の一元化で解消）、#100（composite risk。脅威モデリングまたはラベル付き実行系列のデータセットが前提になり laarma の射程を超えるため、射程外として close 済み）、#77（confidence 較正）、#135（DEFER 解決層の LLM decision 除去、旧 #89 を吸収）

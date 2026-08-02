@@ -382,6 +382,14 @@ LLM 判定結果を、累積 `any()`/直近5件 `any()` として `cumulative_si
 参照）。laarma の同期モデルでは δ が評価前に必ず算出され「未 populate な context 参照」という状態が
 実行時に生じないため、決定論的な (4) の捕捉は R3(a) という機構を介さず構造的に成立する。
 
+### R3(c) の適用範囲: 情報収集系ツールの除外（#174）
+
+`defer_low_confidence`（DEFER・700）は R3(c)「confidence スコア（実装されている場合）が閾値未満なら DEFER」の具体実装である。#174 で、`information_gathering_tools`（`read_file`/`list_files`/`query_database`。`policy.yaml` の `tool_classification.information_gathering_tools` に一元化、§3「条件9/10」参照）をこのルールの `none_of` に加え、`step_up_low_confidence`（STEP_UP・600）からも同様に除外した。これにより、情報収集系ツールは confidence がどれだけ低くても——意図の曖昧さに由来する低下であっても——`defer_low_confidence`/`step_up_low_confidence` の対象から外れ、**R3(c) の適用範囲が情報収集系ツールを除いた集合に狭まる**。
+
+この除外の根拠は条件12前半（`allow_information_gathering`。「情報収集系ツールは risk が materialize しない読み取り専用操作であり、意図が曖昧でも ALLOW してよい」）である。条件12前半は AARM 論文の CONFORMANCE 章 R3 に由来する記述ではなく、laarma の legacy SYSTEM_PROMPT に起源を持つ、条件12後半の一般化（#165 で「laarma の TO BE 設計判断」と確定）と対をなす informative 相当の設計判断であり、論文の記述そのものでもない。したがって本除外は、**informative 相当の原則を根拠に、MUST 要件である R3(c) の適用範囲を狭める**という構図になる。#155 で確立した規律——informative な記述を normative な適合要件であるかのように扱わない——とは逆向きの操作、すなわち normative な要件を informative な根拠で縮小する操作である点に注意を要する。
+
+laarma の立場としては、これを適合性の後退ではなく意図的な設計上の限定と位置づける。R3(c) の目的は「評価しきれないアクションの実行可否を人間の判断に委ねる」ことにあり、情報収集系ツールは条件12後半（#165 で確認）のとおりそれ自体では risk が materialize しない読み取り専用操作である。confidence 低下の原因が「意図の曖昧さ」に限られる場合、評価しきれないのは「どう解釈すべきか」であって「実行して安全か」ではなく、後者が既知（安全）である情報収集系について DEFER で人間に確認を求める実益は薄い。`defer_low_confidence` は情報収集系以外の全アクションには引き続き適用されるため、これは R3(c) の適合要件そのものを撤回するものではなく、「confidence が実装されている場合」の対象範囲を laarma が明示的に選択した結果である。ただし、この選択の妥当性判断は条件12前半という informative 相当の根拠にのみ依拠しており、AARM 論文の R3(c) 自体からはこの限定を導けない。将来 R3(c) の適合性を厳密に問う場面（監査・準拠性評価）が生じたときは、この限定を**laarma 独自の適合性上の留保**として明示する必要がある。
+
 ### DEFER 後の扱い（#89 に先送り）
 
 決定層（入口）は「DEFER するか」を判定するだけで、「その曖昧さが何で、どう解決できるか」は

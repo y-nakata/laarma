@@ -225,15 +225,24 @@ rules:
               contains: CONFIDENTIAL
 
   # 機微データ（PII/CONFIDENTIAL）への read を STEP_UP する（条件13「significant access」側、#142）。
-  # list_files は含めない（ディレクトリ一覧は PUBLIC）。action_matches_intent は条件に書かない
-  # （原文 "even with explicit user intent" — 明示意図があっても STEP_UP。意図一致は ALLOW 帯(100)
-  # の allow_information_gathering 等を発火させうるが、本ルールが STEP_UP 帯(600)で上回る）。
+  # list_files は含めない（ディレクトリ一覧は PUBLIC）。query_database（読み取り専用の DB クエリ、
+  # #171）も対象に含める——条件2（deny_intent_mismatch_destructive）の none_of による除外は
+  # 「意図逸脱 DENY からの除外」であって「機微データへのアクセス制御（本ルール）からの除外」では
+  # ない。read_file と同じ significant access に当たるため、除外を理由に本ルールの対象からも
+  # 漏らすと `query_database(SELECT * FROM customers)` のような機微データを引くクエリが無条件
+  # ALLOW で素通りする（条件7 は SENSITIVE_TOOL を none_of の対象にしないため止まらない）。
+  # reason は path/query どちらのツールにも通用する表現にする（{path} 等ツール固有のプレース
+  # ホルダーは使わない——reason.format() は未知キーで KeyError となり生テンプレートにフォール
+  # バックするため、query_database では '{path}' がそのまま出てしまう）。
+  # action_matches_intent は条件に書かない（原文 "even with explicit user intent" — 明示意図が
+  # あっても STEP_UP。意図一致は ALLOW 帯(100)の allow_information_gathering 等を発火させうるが、
+  # 本ルールが STEP_UP 帯(600)で上回る）。
   - id: step_up_sensitive_read
     decision: STEP_UP
     priority: 600
-    reason: "機微データを含む可能性のあるファイル '{path}' の読み出しには追加確認が必要です。"
+    reason: "機微データを含む可能性のある読み出しには追加確認が必要です。"
     conditions:
-      tool: read_file
+      tool: [read_file, query_database]
       any_of:
         - context:
             data_classification:

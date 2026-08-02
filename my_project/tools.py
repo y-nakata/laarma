@@ -11,9 +11,9 @@ import json
 # policy.yaml の tool_classification（destructive_tools/sensitive_tools/external_tools）・
 # denied_tools が参照するツール名は、実装が存在しない状態を残さずここで全て定義する
 # （実装を持たないツール名を policy が参照していると、policy が実際に評価しうる範囲を
-# デモ上で検証できない）。危険系（execute_shell・delete_all_records・exfiltrate_data・
-# disable_logging）は policy の denied_tools/destructive_tools 側で実行前にブロックされる
-# 想定であり、実装内容自体は状態を変えないダミーで足りる。
+# デモ上で検証できない）。危険系（delete_all_records・exfiltrate_data・disable_logging・
+# execute_shell・execute_sql）は policy の denied_tools 側で実行前にブロックされる想定であり、
+# 実装内容自体は状態を変えないダミーで足りる。
 TOOLS = [
     {"name": "read_file",    "description": "ファイルを読む。",     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
     {"name": "write_file",   "description": "ファイルに書く。",     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},

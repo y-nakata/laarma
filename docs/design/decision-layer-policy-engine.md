@@ -285,10 +285,16 @@ materialize しない無害な準備ステップ（情報収集）では介入�
 `disable_logging`・`execute_shell`・`execute_sql`。条件2 に到達する前に静的ゲートで確定する）・
 情報収集（`read_file`・`list_files`・`query_database`。`none_of` で除外）・破壊/書込
 （`write_file`・`delete_file`）・外部送信（`send_email`・`http_request`・`webhook`・
-`slack_message`）のいずれかに分かれる。一般化が判定を変えるのは破壊/書込でも情報収集でもない
-性質のツールに対してであり、`tools.py` では外部送信系（`external_tools`）がこれにあたる——
-`demo.py` を通じて実 LLM 経由で一般化の効果を確認できる（#171 でダミー実装を追加する以前は、
-`tools.py` に実装のない `benchmark_data.jsonl` 専用の擬似ツール名でのみ検証されていた）。
+`slack_message`）のいずれかに分かれる。一般化が判定を変えうるのは破壊/書込でも情報収集でもない
+性質のツールに対してであり、`tools.py` では外部送信系（`external_tools`）がこれにあたる。ただし
+`tools.py` の現在のツール構成では、条件2 が外部送信系ツールに単独で効く場面は乏しい——外部送信系は
+条件3（`deny_scope_expansion_unjustified`、scope_expansion 参照）の対象でもあり、`action_matches_intent=false`
+になるような意図逸脱アクションはほぼ必ず `scope_expansion=true` も伴うため、priority 910 の条件3 が
+先に確定し、条件2（900）が単独で効く場面を観測できない（`deny_scope_expansion_unjustified_webhook`
+はこの構図の実例）。したがって条件2 の一般化が現在の `tools.py` で実効を持つのは、破壊/書込ツール
+（従来からの対象）に限られる——非破壊・非外部送信・非情報収集という性質のツールが `tools.py` に
+実装されていないため、一般化の理論上の適用範囲（そのようなツールに対する意図逸脱 DENY）は
+現時点では未検証のまま残る。
 
 `derived_signals()`（δn）はどの信号も「このアクション時点の値のみ」を持つという契約に統一されている
 （`4465e40` で確立、`4465e40` の取りこぼしにより `scope_expansion` 系だけこの契約に反していたのを

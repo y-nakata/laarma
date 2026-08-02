@@ -186,13 +186,21 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 `defer_low_confidence`（DEFER・700）に着地する（`--pipeline` 実行限定。`SemanticAmbiguityDetector` 自体は
 `step_up_semantic_contradiction_copy`（`copy(src,src)` の意味論的矛盾検出）でも引き続き検証される）。
 
-なお、旧シナリオ8 が DEFER に到達していた頃（条件2 実装前、#112 Phase D 時点）に観測されていた
-`DeferralResolver` の不具合——DEFER 解決時に LLM が「DEFER された（未実行の）アクション」を
-「セッション内で既に実行済み」と誤読し、根拠不成立の DENY を返す——は、条件2 実装後は本シナリオが
-そもそも DEFER に入らなくなったため再現できなくなったが、`DeferralResolver` が LLM に decision を
-出させる構造自体は変わっていないため、他の DEFER 経路（例: `defer_low_confidence` が他要因で単独発火する
-場合）では依然として起こりうる。この構造上の不具合は解消されておらず、DEFER 解決層の LLM decision
-除去は #135 で扱う。
+なお、#112 Phase D 時点から観測されていた `DeferralResolver` の不具合——DEFER 解決時に LLM が
+「DEFER された（未実行の）アクション」を「セッション内で既に実行済み」と誤読し、根拠不成立の
+DENY を返す——は、#166 で根本原因を特定し修正した。`ContextAccumulator.record_action()` は
+評価対象のアクションを他の処理より先に `append_action()` で `action_history` へ積むため（#156 の
+δn 契約に伴う構造）、`recent_actions()` をそのまま LLM 検出層・`DeferralResolver` に渡すと、
+評価中・DEFER 中のアクション自身が「直近の（＝既に実行済みの）アクション」として見えてしまう。
+評価対象のアクションは `proposed_action`（DeferralResolver では「pending execution」）として別途
+明示的に渡されており、`recent_actions`（"prior actions in this session"）に重複して含める理由は
+無い。`ContextAccumulator._recent_actions_excluding()` を新設し、評価対象アクション自身を
+`action_id` で除外した上で `recent_actions` を構築するよう、δ を産出する3つの LLM 検出層
+（`scope_expansion_llm.py`・`action_matches_intent_llm.py`・`confidence_llm.py`）と
+`DeferralResolver.resolve()` の双方を修正した（`action_history`・レシート自体への記録順序は
+変更していない。影響は LLM へのプロンプト構築のみ）。`DeferralResolver` が LLM に decision を
+出させる構造自体は変わっていないため、この誤読以外の再評価精度の課題は残る。DEFER 解決層の
+LLM decision 除去は #135 で扱う。
 
 条件3（`deny_scope_expansion_unjustified`、#142）実装により、`step_up_low_confidence` にも同種の
 影響が生じた。既存の `step_up_low_confidence_external_action`（webhook、天気を尋ねる意図）は

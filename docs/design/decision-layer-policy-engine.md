@@ -443,6 +443,34 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 「決定論で列挙しきれない意味論的な曖昧・矛盾（ただし特定できるもの）」だけを担う。この境界を守らないと、決定論で書けるものまで
 不確実な LLM に頼る誘惑が生じる。
 
+### 較正定数の棚卸し（#77 の対象範囲）
+
+confidence を構成する数値はここまでの実装で複数箇所に散らばった。#77（confidence 較正）が何を
+対象にしているかを追えるよう、現存する定数とその根拠の性質を一覧にする。
+
+| 定数 | 値 | 所在 | 根拠の性質 |
+|---|---|---|---|
+| semantic_distance の減点係数 | 0.3 | `context_accumulator.py` `_compute_confidence` | 裏取りのない暫定値 |
+| scope_expansion=true の減点 | 0.25 | 同上 | 裏取りのない暫定値 |
+| scope_expansion=None（判定不能）の減点 | 0.25 | 同上 `_SCOPE_EXPANSION_UNDETERMINED_PENALTY` | 独立の恣意値ではなく、確定値側（0.25）の効果量を転用する設計原則（#160）から導出。原則自体は較正の枠外だが、magnitude は上記「scope_expansion=true の減点」に従属する |
+| action_matches_intent=true の加点 | 0.1 | 同上 | 裏取りのない暫定値 |
+| action_matches_intent=None（判定不能）の減点 | 0.1 | 同上 `_ACTION_MATCHES_INTENT_UNDETERMINED_PENALTY` | 確定値側（0.1）の効果量を転用（#161）。同上の理由で「action_matches_intent=true の加点」に従属 |
+| confidence_llm の検出時減点 | 0.5 | `confidence_llm.py` `_LLM_PENALTY` | 単一の実測ベースライン（`deny_ambiguous_delete_intent_mismatch`、confidence≈0.863）を `defer_low_confidence` の閾値以下（0.863-0.5=0.363≤0.4）に落とすための逆算値。他の暫定値と異なり測定点を1つ持つが、汎化を検証したわけではない |
+| `defer_low_confidence` の閾値 | `confidence≤0.4` | `policy.yaml` | 裏取りのない暫定値 |
+| `step_up_low_confidence` の閾値 | `0.4<confidence<0.6` | `policy.yaml` | 裏取りのない暫定値 |
+| `allow_low_semantic_distance`/`deny_intent_mismatch_destructive` の距離閾値 | `<0.3`/`>0.4` | `policy.yaml` 条件6・条件2 | legacy SYSTEM_PROMPT（AARM 論文以前の laarma 実装）由来の値をそのまま採用。埋め込みモデル依存で、モデルを変えると実測距離が閾値をまたぎうる（PR #177 レビューで `allow_low_semantic_distance_stock_price`/`allow_no_sensitive_data_stock_price` が閾値の両側に接近している点を確認済み、対応不要の記録として） |
+| `defer_low_confidence`/`step_up_low_confidence` の情報収集系ツール除外 | — | `policy.yaml` `information_gathering_tools` | 条件12前半（informative 相当）に基づく適用範囲の限定（#174、§4「R3(c) の適用範囲」）。数値の較正ではなく、どの母集団に上記の閾値を適用するかという範囲の設計判断 |
+
+この一覧が示すのは、**個々の数値が正しいかどうかを検証する手段が、目視のレビューと benchmark
+上の少数ケースの実測しかない**という状態である。`benchmark_data.jsonl` の `expected_rule_id` は
+「この入力でこのルールが発火するか」という決定論的な回帰は保証するが、「0.3 や 0.4 という閾値が
+実際の良性/悪性系列を正しく分離するか」という統計的な妥当性（ROC/PR 分析、held-out データでの
+汎化）までは検証しない——これが #77 の本来の射程であり、これを確かめるにはラベル付き実行系列の
+データセットと、それに対する体系的な閾値探索が要る。[[project_laarma_learning_purpose]] の判断どおり、laarma は本番投入を
+目指さない学習用の試作実装であり、そのようなデータセットを用意して統計的較正を行う計画は無い。
+この一覧は較正そのものではなく、**#77 が指す「未検証」の範囲を具体的に特定し、将来この作業に
+着手する場合の出発点を残す**ためのものである。
+
 ---
 
 ## 6. デモシナリオの再現性（妥当性検証）

@@ -136,6 +136,9 @@ class DeferralResolver:
             resp = self._get_client().messages.create(
                 model=self._model,
                 max_tokens=256,
+                # 分類・判定タスクであり創造性は不要。temperature=0 で出力の揺れを抑える
+                # （バッチ推論の浮動小数点非結合性により完全な決定性は保証されないが、変動を減らせる）。
+                temperature=0,
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": json.dumps({
                     "original_deferral_reason": _truncate(deferred_result.reason, _MAX_REASON_LEN),

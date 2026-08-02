@@ -143,6 +143,9 @@ class ActionMatchesIntentDetector:
             resp = self._get_client().messages.create(
                 model=self._model,
                 max_tokens=200,
+                # 分類・判定タスクであり創造性は不要。temperature=0 で出力の揺れを抑える
+                # （バッチ推論の浮動小数点非結合性により完全な決定性は保証されないが、変動を減らせる）。
+                temperature=0,
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": json.dumps({
                     "user_intent":     _truncate(user_intent, _MAX_INTENT_LEN),

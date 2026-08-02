@@ -168,6 +168,11 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "外部送信とみなすツール名。context_accumulator の scope_expansion 判定に使用。"
+        },
+        "information_gathering_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "情報収集系（read-only、それ自体では risk が materialize しない）とみなすツール名。他の3つと異なり Policy dataclass には持たず、rules: 内の条件値（YAML アンカー参照）としてのみ使う。#174 での一元化。"
         }
       }
     }

@@ -82,6 +82,19 @@ tool_classification:
     - http_request
     - webhook
     - slack_message
+  # 情報収集系ツール（read-only、それ自体では risk が materialize しない）。他の3つと違い
+  # Policy dataclass には持たない——sensitive_tools/destructive_tools/external_tools は
+  # context_accumulator.py が δ 信号の導出（SENSITIVE_TOOL ラベル・scope_expansion 判定）に
+  # 使うのに対し、この集合を Python 側で参照する δ 信号は無く、rules: 内の条件値としてのみ使う
+  # （#174 での一元化。read_file/list_files/query_database を複数条件〔条件2・条件12前半・
+  # defer_low_confidence〕に個別に書くと更新漏れが起きるため、単一のアンカーに集約する）。
+  # list_files を含めるが、条件13（step_up_sensitive_read）はこのアンカーを使わない——
+  # significant access（機微データへの read）という別の軸の判定であり、list_files（ディレクトリ
+  # 一覧、PUBLIC）は対象外という意図的な違いを持つため。
+  information_gathering_tools: &information_gathering_tools
+    - read_file
+    - list_files
+    - query_database
 
 # 静的ルール（PolicyEngine が全マッチを収集し priority で解決する）
 # 【注記】これらは AARM 仕様外のドメイン固有ルール（試作上の妥協）。
@@ -161,7 +174,7 @@ rules:
     priority: 900
     conditions:
       none_of:
-        - tool: [read_file, list_files, query_database]
+        - tool: *information_gathering_tools
       context:
         action_matches_intent: false
         semantic_distance:
@@ -252,11 +265,17 @@ rules:
               contains: CONFIDENTIAL
 
   # confidence_level（evaluability）参照ルール（条件10・15の移行、#112 Phase B3・Phase C）。
-  # ツール限定はしない（confidence は distance と異なり危険性軸ではなく評価可能性の軸のため、
-  # 破壊的操作に絞る理由がない）。priority は帯（#129）に従い、defer_low_confidence=700（DEFER 帯）・
-  # step_up_low_confidence=600（STEP_UP 帯）。安全序列 DEFER > STEP_UP により、両者が同時発火する
-  # ことはない（confidence_level の区間 lte:0.4 と gt:0.4,lt:0.6 が排他）が、他 decision のルールと
-  # 重なった場合も帯の上下で解決され、同一 priority 競合による DEFER 落ちは生じない。
+  # 情報収集系ツール（*information_gathering_tools）は none_of で除外する（#174）。confidence は
+  # distance と異なり危険性軸ではなく評価可能性の軸のため、破壊的操作に絞る理由はもとより無いが、
+  # 当初ツール非限定のまま出荷した結果、意図の曖昧さに由来する confidence 低下だけで
+  # read_file/list_files/query_database が DEFER/STEP_UP に倒れ、条件12前半
+  # （allow_information_gathering、「情報収集系は意図が曖昧でも ALLOW」）の原則と食い違う挙動が
+  # 実測で判明した（#166 の demo_output_sample.txt 再生成時）。情報収集系は非破壊・低リスクという
+  # 原設計を優先し、confidence の低さを理由に介入しない。priority は帯（#129）に従い、
+  # defer_low_confidence=700（DEFER 帯）・step_up_low_confidence=600（STEP_UP 帯）。安全序列
+  # DEFER > STEP_UP により、両者が同時発火することはない（confidence_level の区間 lte:0.4 と
+  # gt:0.4,lt:0.6 が排他）が、他 decision のルールと重なった場合も帯の上下で解決され、同一
+  # priority 競合による DEFER 落ちは生じない。
   #
   # 決定論項（distance × 0.3 の減点 + scope_expansion 0.25 の減点）だけでは confidence の下限が
   # 0.45 に留まり defer_low_confidence（条件10）は発火しない。confidence_llm.py の LLM 検出層
@@ -267,6 +286,8 @@ rules:
     priority: 600
     reason: "アクションの評価確信度が低いため、追加確認が必要です。"
     conditions:
+      none_of:
+        - tool: *information_gathering_tools
       context:
         confidence_level:
           gt: 0.4
@@ -279,14 +300,18 @@ rules:
     priority: 700
     reason: "アクションの評価確信度が著しく低いため、実行を保留します。"
     conditions:
+      none_of:
+        - tool: *information_gathering_tools
       context:
         confidence_level:
           lte: 0.4
 
   # 情報収集系は全体の意図が曖昧でも ALLOW する（条件12前半、#142・#139）。意図の曖昧さ
-  # （semantic_distance/confidence_level）は条件に書かない。上位帯（DENY/DEFER/STEP_UP）が
-  # 発火すればそちらが勝つ——機微データ（PII/CONFIDENTIAL）を含む read_file は
-  # step_up_sensitive_read（600）が本ルール（130）に優先し STEP_UP になる。
+  # （semantic_distance/confidence_level）は条件に書かない——confidence 低下由来の DEFER/STEP_UP
+  # は #174 で情報収集系を除外したため、そもそも競合しない。機微データ（PII/CONFIDENTIAL）を
+  # 含む read_file/query_database は、confidence とは別軸の step_up_sensitive_read（600）が
+  # 本ルール（130）に優先し STEP_UP になる——この経路は #174 の対象外（data_classification 軸の
+  # 判定であり confidence 軸ではないため）。
   #
   # priority 130 は ctx-ALLOW 帯（100番台、#129）内の細分化（#142 パス2 総点検）。より具体的で
   # 情報量の多い許可理由が優先して出るよう並べる: 140=allow_destructive_explicit_high_confidence
@@ -300,9 +325,7 @@ rules:
     priority: 130                 # ctx-ALLOW 帯（#129）内の細分化（#142 パス2）
     reason: "情報収集系の操作のため許可します。"
     conditions:
-      any_of:
-        - tool: read_file
-        - tool: list_files
+      tool: *information_gathering_tools
 
   # 条件5〜8（ALLOW、#142）。#139 で「baseline ALLOW で自然に出るから専用ルール不要」という判断を
   # 明示的に退けたため、baseline と同じ decision（ALLOW）でも意図された許可として明示ルール化する

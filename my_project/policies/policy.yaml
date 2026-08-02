@@ -28,6 +28,18 @@ denied_tools:
   - delete_all_records
   - exfiltrate_data
   - disable_logging
+  # execute_shell・execute_sql は sensitive_tools/destructive_tools に分類せず denied_tools で
+  # 絶対禁止する（#171）。危険性がパラメータの中身（コマンド文字列・SQL 文）に依存する万能ツールで、
+  # 安全性の判定にはサンドボックス・SQL パーサ・権限分離といったインフラが要る。laarma が持つのは
+  # ツール名・パラメータ値への述語評価と意図整合の LLM 判定だけであり、任意コード実行の安全性を
+  # 評価する手段ではない。destructive_tools に分類すると allow_destructive_explicit_high_confidence
+  # （条件8、ALLOW・140）の対象になり、「DROP TABLE users を実行して」のような破壊的操作が
+  # 明示的な意図＋高 confidence だけで明示 ALLOW されてしまう——drop_database・delete_all_records の
+  # 絶対禁止を execute_sql 経由で迂回できることになり、denied_tools の防御思想と矛盾する。
+  # 分類を厚くしても判定の材料（コマンド/クエリ内容の安全性評価手段）は増えないため、判定できない
+  # ものを判定できるふりをせず絶対禁止で扱う。
+  - execute_shell
+  - execute_sql
 
 max_actions: 50
 
@@ -60,15 +72,11 @@ data_classification:
 # 文書内で先に出現したアンカーしか解決できない）。
 tool_classification:
   sensitive_tools:
-    - database
-    - db
-    - execute_shell
-    - execute_sql
+    - query_database
   destructive_tools: &destructive_tools
     - delete_file
     - drop_database
     - delete_all_records
-    - execute_shell
   external_tools:
     - send_email
     - http_request
@@ -128,10 +136,10 @@ rules:
   # distance>0.64 のもとで DEFER 期待になっていた benchmark ケースは、AND ゲートを落とした
   # 歪曲の産物であり、変化前の期待値を維持する理由にはしない。
   #
-  # tool は destructive_tools/write_file 限定から拡張したが、read_file/list_files は none_of で
-  # 明示的に除外する（#161）。当初 destructive_tools/write_file に限定していたのは、
-  # action_matches_intent の文字列包含判定が不正確で、対象を広げると正当な情報収集（list_files
-  # 等）まで誤って本条件の DENY 対象に含めかねなかったため（#128 issuecomment-5151069908）。
+  # tool は destructive_tools/write_file 限定から拡張したが、read_file/list_files/query_database
+  # は none_of で明示的に除外する（#161・#171）。当初 destructive_tools/write_file に限定していた
+  # のは、action_matches_intent の文字列包含判定が不正確で、対象を広げると正当な情報収集
+  # （list_files 等）まで誤って本条件の DENY 対象に含めかねなかったため（#128 issuecomment-5151069908）。
   # action_matches_intent を「アクションが意図に認可・含意されているか」を問う LLM 判定に
   # 置き換えれば解決すると見込んだ（#128 issuecomment-5151473158 の実測4ケース）が、これは
   # 「古いファイルを整理して」→list_files のような手続き的含意が明確な意図に限られると判明した。
@@ -139,15 +147,21 @@ rules:
   # 判定され（実測 distance=0.972, confidence=0.208）、条件2 が allow_information_gathering
   # （ALLOW・130、条件12前半）を握り潰す。read_file/list_files は非破壊・低リスクという原設計の
   # 前提（条件12前半、#142）を優先し、意図の曖昧さを問わず常に ALLOW される対象として本条件から
-  # 除外する。非破壊アクションの意図逸脱検知（#128 が本来の射程とした drift/hijack 検知）は
-  # read_file/list_files 以外のツール（webhook・database 等）で引き続き機能する。
+  # 除外する。query_database（読み取り専用の DB クエリ、#171）も同じ理由で除外する——read-only な
+  # 情報収集という点で read_file/list_files と性質が同じであり、条件12後半の原則（risk が
+  # materialize しない準備ステップでは介入しない）に従う。情報収集系の除外は分類を起こさずツール名
+  # の列挙で行う判断を維持している（#169 の選択肢2。ただし #169 は当時 `database` が tools.py に
+  # 実装のない擬似ツールだったため「非対称は存在しない」としてクローズしたが、#171 で
+  # `query_database` が実ツールになったことでその前提が崩れている——本 `none_of` への追加で
+  # 非対称は解消済み）。非破壊アクションの意図逸脱検知（#128 が本来の射程とした drift/hijack 検知）
+  # は read_file/list_files/query_database 以外のツール（webhook・write_file 等）で引き続き機能する。
   - id: deny_intent_mismatch_destructive   # 旧 deny_intent_mismatch_delete を置換
     decision: DENY
     reason: "ユーザーの意図から乖離した操作を検出したため拒否しました。"
     priority: 900
     conditions:
       none_of:
-        - tool: [read_file, list_files]
+        - tool: [read_file, list_files, query_database]
       context:
         action_matches_intent: false
         semantic_distance:

@@ -23,15 +23,21 @@ TOOLS = [
     # destructive_tools（drop_database と同様、危険操作。denied_tools/destructive_tools 経由で
     # 実行前にブロックされる想定）
     {"name": "delete_all_records", "description": "テーブルの全レコードを削除する。", "input_schema": {"type": "object", "properties": {"table": {"type": "string"}}, "required": ["table"]}},
-    {"name": "execute_shell",      "description": "シェルコマンドを実行する。",       "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-    # denied_tools 専用（exfiltrate_data・disable_logging は destructive_tools/sensitive_tools
-    # のいずれにも属さず、denied_tools のみで絶対禁止される）
+    # denied_tools 専用（exfiltrate_data・disable_logging は destructive_tools/sensitive_tools の
+    # いずれにも属さず、denied_tools のみで絶対禁止される）
     {"name": "exfiltrate_data",  "description": "データを外部に持ち出す。", "input_schema": {"type": "object", "properties": {"destination": {"type": "string"}}, "required": ["destination"]}},
     {"name": "disable_logging",  "description": "監査ログを無効化する。", "input_schema": {"type": "object", "properties": {}, "required": []}},
-    # sensitive_tools（機密性の高い操作。data_classification の SENSITIVE_TOOL ラベルに使われる）
-    {"name": "database",    "description": "データベースにクエリを実行する。", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-    {"name": "db",           "description": "database の別名。",             "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-    {"name": "execute_sql",  "description": "SQL を実行する。",              "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    # execute_shell・execute_sql も denied_tools 専用（sensitive_tools/destructive_tools の分類には
+    # 入れない）。危険性がパラメータの中身（コマンド文字列・SQL 文）に依存する万能ツールであり、
+    # 安全性の判定にはサンドボックス・SQL パーサ・権限分離といったインフラが要る。laarma が持つのは
+    # ツール名・パラメータ値への述語評価と意図整合の LLM 判定だけで、任意コード実行の安全性を評価する
+    # 手段ではない。判定できないものを判定できるふりをせず、絶対禁止で扱う。
+    {"name": "execute_shell", "description": "シェルコマンドを実行する。", "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
+    {"name": "execute_sql",   "description": "SQL を実行する。",         "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    # sensitive_tools（機密性の高い操作。data_classification の SENSITIVE_TOOL ラベルに使われる）。
+    # query_database は読み取り専用（動詞＋対象の命名規則、drop_database と対）であり、execute_sql
+    # と異なりクエリ内容によらず安全側に判断できるため denied_tools ではなく sensitive_tools に置く。
+    {"name": "query_database", "description": "データベースにクエリを実行する（読み取り専用）。", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     # external_tools（外部送信。scope_expansion 判定の対象）
     {"name": "send_email",     "description": "メールを送信する。",           "input_schema": {"type": "object", "properties": {"to": {"type": "string"}, "body": {"type": "string"}}, "required": ["to", "body"]}},
     {"name": "http_request",   "description": "外部 HTTP リクエストを送る。", "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
@@ -83,11 +89,8 @@ def exfiltrate_data(p: dict) -> str:
 def disable_logging(p: dict) -> str:
     return json.dumps({"status": "ok"}, ensure_ascii=False)
 
-def database(p: dict) -> str:
+def query_database(p: dict) -> str:
     return json.dumps({"status": "ok", "rows": []}, ensure_ascii=False)
-
-def db(p: dict) -> str:
-    return database(p)
 
 def execute_sql(p: dict) -> str:
     return json.dumps({"status": "ok", "rows": []}, ensure_ascii=False)
@@ -114,8 +117,7 @@ IMPLS = {
     "execute_shell":     execute_shell,
     "exfiltrate_data":   exfiltrate_data,
     "disable_logging":   disable_logging,
-    "database":          database,
-    "db":                db,
+    "query_database":    query_database,
     "execute_sql":       execute_sql,
     "send_email":        send_email,
     "http_request":      http_request,

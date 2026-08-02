@@ -145,10 +145,10 @@ DEFER 4項目・STEP_UP 3項目の計 15 個の判定基準を持つ。組み替
 | 9 | DEFER | 意図が曖昧で未認可の自律判断 | **処遇不要**（**#137**）。「未認可の自律判断」は R3(a)(b)(c) のいずれでもなく入口条件にならない。ケース自体は confidence 低下（(c)）経由で成立済み |
 | 10 | DEFER | `confidence < 0.4` かつ追加 context で解決可能 | **新規ルール不要**（**#137**）。既存 `defer_low_confidence`（DEFER・700）が前半のみを条件にしており結果的に正しい形。後半「追加 context で解決可能」は出口条件なので入口に書かない |
 | 11 | DEFER | 安全だが明示的認可が欠落 | **廃止**（**#137**）。認可の欠落を判定する信号が δ になく、実装に落とせる具体性を持たない。従前の「confidence 低 → DEFER」写像は、落とせる先が無いため形の似た confidence DEFER に無理に寄せたもの |
-| 12 | DEFER 節 | 情報収集系は曖昧でも ALLOW（後半: 介入点は risk が materialize する破壊/書込） | DEFER の起因ではないため DEFER 区分としては射程外。前半は `allow_information_gathering`（ALLOW・ctx-ALLOW 帯）として明示 ALLOW ルール化（`read_file`/`list_files`）。後半の原則は **#128** に係属 |
+| 12 | DEFER 節 | 情報収集系は曖昧でも ALLOW（後半: 介入点は risk が materialize する破壊/書込） | DEFER の起因ではないため DEFER 区分としては射程外。前半は `allow_information_gathering`（ALLOW・ctx-ALLOW 帯）として明示 ALLOW ルール化（`read_file`/`list_files`/`query_database`、#171）。後半の原則は #165 で条件2 の一般化として実装済み。加えて #174 で、confidence 低下由来の `defer_low_confidence`/`step_up_low_confidence` からも情報収集系ツールを除外し、「意図が曖昧でも ALLOW」を confidence 軸でも徹底した |
 | 13 | STEP_UP | PII/CONFIDENTIAL の削除**または重大アクセス** | deletion 側は `step_up_pii_delete`（STEP_UP・600）。significant access（機微データの read）側は `step_up_sensitive_read`（STEP_UP・600、`read_file` のみ・`list_files` は含めない）。いずれも当該ファイル（現時点のアクション）の機微性を見る `context.data_classification`（当該アクション時点のみ）を参照し PII/CONFIDENTIAL の両方を拾う（累積 `cumulative_data_classification` との取り違えと CONFIDENTIAL の抜けを是正、**#143**）。`action_matches_intent` は条件に書かない（原文 "even with explicit user intent" — 明示意図があっても STEP_UP。ALLOW 帯(100)より STEP_UP 帯(600)が優先されることで表現する） |
 | 14 | STEP_UP | 本番の高影響操作 | `step_up_production_destructive`（STEP_UP・600）。本番かつメンテナンス窓内かつ重要ファイル以外という、既存2ルール（`deny_critical_file_delete_in_prod`・`production_delete_defer`）が覆っていない領域を埋める |
-| 15 | STEP_UP | `confidence 0.4-0.6` かつ中程度リスク | **新規ルール不要**。既存 `step_up_low_confidence`（STEP_UP・600）が正しい形。`with moderate risk` は条件に書かない（危険性は evaluability の軸である confidence に混ぜない——§5） |
+| 15 | STEP_UP | `confidence 0.4-0.6` かつ中程度リスク | **新規ルール不要**。既存 `step_up_low_confidence`（STEP_UP・600）が正しい形。`with moderate risk` は条件に書かない（危険性は evaluability の軸である confidence に混ぜない——§5）。#174 で条件12前半（`*information_gathering_tools`）を `none_of` で除外した点は条件12の行に記載の通り、本ルールにも同様に適用済み |
 
 移行先はおおむね次に分かれる: (1) δ・tool・環境を参照するポリシールール（条件 2,3,5,6,7,8,12前半,13,14,15）、(2) 別 Issue に委ねる（条件1=#128、条件4=#100）、(3) 既存ルールが既に正しい形で新規不要（条件10,15）、(4) 処遇不要・廃止（条件9,11=#137）。各条件の詳細な検討（ルール文案・他ルールとの非重複検証・実装順の制約）は #142。
 
@@ -211,6 +211,21 @@ scope_expansion の減点(0.25)が必須だが、それは同時に条件3 の D
 `step_up_low_confidence` をデフォルト実行（非 `--pipeline`）で発火させる決定論的ケースが構造的に
 作れなくなった。メカニズム自体は `--pipeline` 実行の `step_up_semantic_contradiction_copy`
 （confidence LLM 検出層による減点）で引き続き検証される。
+
+`defer_low_confidence`/`step_up_low_confidence` はもともとツール非限定だったが、#174 で
+情報収集系ツール（`*information_gathering_tools`、`read_file`/`list_files`/`query_database`）を
+`none_of` で除外した。confidence は distance と異なり危険性軸ではなく評価可能性の軸であり
+ツールを絞る理由はもとより無いが、ツール非限定のまま出荷した結果、意図の曖昧さに由来する
+confidence 低下だけで情報収集系が DEFER/STEP_UP に倒れ、条件12前半（`allow_information_gathering`、
+「情報収集系は意図が曖昧でも ALLOW」）の原則と食い違う挙動が実測で判明した（#166 の
+`demo_output_sample.txt` 再生成時。デモシナリオ8 の 1手目 `list_files` が `defer_low_confidence` で
+DEFER されていた）。情報収集系ツールの定義は `policy.yaml` の `tool_classification.
+information_gathering_tools`（YAML アンカー）に一元化し、条件2 の `none_of`・
+`allow_information_gathering` の対象・`defer_low_confidence`/`step_up_low_confidence` の
+`none_of` の4箇所から同じアンカーを参照する（読み取り専用ツールが増えるたびに複数箇所を
+個別に更新する不整合を避けるため）。`step_up_sensitive_read`（条件13）はこのアンカーを
+使わない——重大アクセス（機微データへの read）という別の軸の判定であり、`list_files`
+（ディレクトリ一覧、PUBLIC）は対象外という意図的な違いを持つため。
 
 ### δ 参照の記法: `context.<signal>` 述語オブジェクト
 
@@ -367,6 +382,14 @@ LLM 判定結果を、累積 `any()`/直近5件 `any()` として `cumulative_si
 参照）。laarma の同期モデルでは δ が評価前に必ず算出され「未 populate な context 参照」という状態が
 実行時に生じないため、決定論的な (4) の捕捉は R3(a) という機構を介さず構造的に成立する。
 
+### R3(c) の適用範囲: 情報収集系ツールの除外（#174）
+
+`defer_low_confidence`（DEFER・700）は R3(c)「confidence スコア（実装されている場合）が閾値未満なら DEFER」の具体実装である。#174 で、`information_gathering_tools`（`read_file`/`list_files`/`query_database`。`policy.yaml` の `tool_classification.information_gathering_tools` に一元化、§3「条件9/10」参照）をこのルールの `none_of` に加え、`step_up_low_confidence`（STEP_UP・600）からも同様に除外した。これにより、情報収集系ツールは confidence がどれだけ低くても——意図の曖昧さに由来する低下であっても——`defer_low_confidence`/`step_up_low_confidence` の対象から外れ、**R3(c) の適用範囲が情報収集系ツールを除いた集合に狭まる**。
+
+この除外の根拠は条件12前半（`allow_information_gathering`。「情報収集系ツールは risk が materialize しない読み取り専用操作であり、意図が曖昧でも ALLOW してよい」）である。条件12前半は AARM 論文の CONFORMANCE 章 R3 に由来する記述ではなく、laarma の legacy SYSTEM_PROMPT に起源を持つ、条件12後半の一般化（#165 で「laarma の TO BE 設計判断」と確定）と対をなす informative 相当の設計判断であり、論文の記述そのものでもない。したがって本除外は、**informative 相当の原則を根拠に、MUST 要件である R3(c) の適用範囲を狭める**という構図になる。#155 で確立した規律——informative な記述を normative な適合要件であるかのように扱わない——とは逆向きの操作、すなわち normative な要件を informative な根拠で縮小する操作である点に注意を要する。
+
+laarma の立場としては、これを適合性の後退ではなく意図的な設計上の限定と位置づける。R3(c) の目的は「評価しきれないアクションの実行可否を人間の判断に委ねる」ことにあり、情報収集系ツールは条件12後半（#165 で確認）のとおりそれ自体では risk が materialize しない読み取り専用操作である。confidence 低下の原因が「意図の曖昧さ」に限られる場合、評価しきれないのは「どう解釈すべきか」であって「実行して安全か」ではなく、後者が既知（安全）である情報収集系について DEFER で人間に確認を求める実益は薄い。`defer_low_confidence` は情報収集系以外の全アクションには引き続き適用されるため、これは R3(c) の適合要件そのものを撤回するものではなく、「confidence が実装されている場合」の対象範囲を laarma が明示的に選択した結果である。ただし、この選択の妥当性判断は条件12前半という informative 相当の根拠にのみ依拠しており、AARM 論文の R3(c) 自体からはこの限定を導けない。将来 R3(c) の適合性を厳密に問う場面（監査・準拠性評価）が生じたときは、この限定を**laarma 独自の適合性上の留保**として明示する必要がある。
+
 ### DEFER 後の扱い（#89 に先送り）
 
 決定層（入口）は「DEFER するか」を判定するだけで、「その曖昧さが何で、どう解決できるか」は
@@ -486,11 +509,13 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
   `step_up_low_confidence` で対応済み・新規ルール不要。
   DEFER トリガーの整理（適合性は R3、FRAMEWORK 章は実装可能なもの〔(1) 組み合わせ・(2a) 曖昧な意図〕
   のみ設計選択で拾う）のうち δ 依存部分の網羅的な検証は未了。
-- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決機構（#89）、composite risk（#100）。
-  δ 参照ポリシーは #112 で段階実装済み（旧 #107 吸収）。priority 体系化（#129）はクローズ済み。
-  scope_expansion の LLM 検出層（#99）・fail-closed の三値化（#160）・action_matches_intent の
-  LLM 検出層（#161、整合信号の統合含む、#128）は実装済み。confidence LLM 検出層の実演シナリオ
-  （#150、`defer_ambiguous_intent_destructive_pipeline`）も実装済み。
+- **他 Issue 依存**: confidence 較正（#77）、DEFER 解決層の LLM decision 除去（#135、旧 #89 を吸収）、
+  composite risk（#100）。δ 参照ポリシーは #112 で段階実装済み（旧 #107 吸収）。priority 体系化
+  （#129）はクローズ済み。scope_expansion の LLM 検出層（#99）・fail-closed の三値化（#160）・
+  action_matches_intent の LLM 検出層（#161、整合信号の統合含む、#128）は実装済み。confidence
+  LLM 検出層の実演シナリオ（#150、`defer_ambiguous_intent_destructive_pipeline`）も実装済み。
+  情報収集系ツールが confidence 低下由来の DEFER/STEP_UP に倒れる乖離（#174）も
+  `information_gathering_tools` の一元化により解消済み。
 
 ---
 
@@ -501,4 +526,4 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
 - 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（#112 が触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
-- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外の非対称を指摘。当時は根拠にした `database` が tools.py に実装のない擬似ツールだったため取り下げクローズしたが、#171 で `query_database` が実ツールになり前提が崩れたため、`none_of` への追加で改めて解消済み）、#172（execute_shell/execute_sql の denied_tools 化。#171 の指摘を受け destructive_tools 分類を撤回）、#150（confidence LLM 検出層の実演シナリオ）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）
+- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外の非対称を指摘。当時は根拠にした `database` が tools.py に実装のない擬似ツールだったため取り下げクローズしたが、#171 で `query_database` が実ツールになり前提が崩れたため、`none_of` への追加で改めて解消済み）、#172（execute_shell/execute_sql の denied_tools 化。#171 の指摘を受け destructive_tools 分類を撤回）、#150（confidence LLM 検出層の実演シナリオ）、#166（demo.py のナレーション乖離・DeferralResolver の事実誤認・temperature 未設定の是正）、#174（情報収集系ツールが confidence 低下由来の DEFER/STEP_UP に倒れる乖離。`information_gathering_tools` の一元化で解消）、#100（composite risk）、#77（confidence 較正）、#135（DEFER 解決層の LLM decision 除去、旧 #89 を吸収）

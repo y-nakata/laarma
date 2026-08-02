@@ -261,17 +261,19 @@ true` を条件とする `deny_scope_expansion_unjustified`（DENY・910・termi
 
 `action_matches_intent` の LLM 化は条件2（`deny_intent_mismatch_destructive`）のツール制限も
 撤廃した（#161。当初 `destructive_tools`/`write_file` に限定していたのは旧ヒューリスティックの
-不正確さを理由とする暫定措置だった、#128 issuecomment-5151069908）。ただし `read_file`/`list_files`
-は `none_of` で明示的に除外し、`allow_information_gathering`（条件12前半、ALLOW・130）を条件2 の
-DENY(900) より事実上優先させている。これは実測で判明した制約による——`action_matches_intent`
-の LLM 判定は「古いファイルを整理して」→`list_files` のような手続き的含意が明確な意図では
-`authorized=true` になるが、より曖昧な意図（「何か手伝えることある？」→`list_files`）では実 LLM
-でも `authorized=false` と判定される（実測 distance=0.972, confidence=0.208）。priority の仕組み上
-DENY(900) は ALLOW(130) に優先するため、`action_matches_intent` の精度に条件12前半の発火可否を
-委ねると、意図が曖昧なだけで read_file/list_files が DENY に倒れうる。read_file/list_files は
-非破壊・低リスクという条件12前半の原設計（#142）を優先し、意図の曖昧さを問わず常に ALLOW される
-対象として条件2 から除外する。非破壊アクションの意図逸脱検知（#128 が本来の射程とした
-drift/hijack 検知）は read_file/list_files 以外のツール（`webhook`・`database` 等）で機能する。
+不正確さを理由とする暫定措置だった、#128 issuecomment-5151069908）。ただし `read_file`/`list_files`/
+`query_database` は `none_of` で明示的に除外し、`allow_information_gathering`（条件12前半、
+ALLOW・130）を条件2 の DENY(900) より事実上優先させている（`query_database` は #171 で
+`read_file`/`list_files` と同じ理由により追加）。これは実測で判明した制約による——
+`action_matches_intent` の LLM 判定は「古いファイルを整理して」→`list_files` のような手続き的
+含意が明確な意図では `authorized=true` になるが、より曖昧な意図（「何か手伝えることある？」→
+`list_files`）では実 LLM でも `authorized=false` と判定される（実測 distance=0.972,
+confidence=0.208）。priority の仕組み上 DENY(900) は ALLOW(130) に優先するため、
+`action_matches_intent` の精度に条件12前半の発火可否を委ねると、意図が曖昧なだけで read_file/
+list_files が DENY に倒れうる。これらは非破壊・低リスクという条件12前半の原設計（#142）を優先し、
+意図の曖昧さを問わず常に ALLOW される対象として条件2 から除外する。非破壊アクションの意図逸脱
+検知（#128 が本来の射程とした drift/hijack 検知）は情報収集系以外のツール（`webhook`・`send_email`
+等の `external_tools`）で機能する。
 
 この対象範囲は、旧 IntentAlignment の条件12後半（原文 "reserve DEFER/DENY for the actual
 destructive or write action where the risk materializes"）の原則を一般化したものでもある。
@@ -279,14 +281,20 @@ destructive or write action where the risk materializes"）の原則を一般化
 materialize しない無害な準備ステップ（情報収集）では介入せず、実際にリスクが生じるアクションで
 介入する」という原則へ意図的に一般化した TO BE の判断として採用する（#165）。条件2 の対象は
 ツール名の値そのものであり、`my_project/tools.py` の実装有無とは無関係に判定する。`tools.py` が
-実装する5つのツール（`read_file`/`write_file`/`list_files`/`delete_file`/`drop_database`）は、
-破壊/書込（`write_file`/`delete_file`/`drop_database`）と情報収集（`read_file`/`list_files`）の
-いずれかにきれいに分かれるため、`tools.py` の範囲では一般化の前後で DENY 対象が変わらない
-（`drop_database` は `denied_tools` の静的ゲートで条件2 に到達する前に確定する）。一般化が判定を
-変えるのは、破壊/書込でも情報収集でもない性質のツール（例: 外部送信、機微データへの読み取り専用
-クエリ）に対してであり、そのようなツールは `tools.py` にまだ実装されていない。`database`/`webhook`
-等、`benchmark_data.jsonl` が `Action` を直接構築して使う擬似ツール名がこの性質を代表しており、
-一般化の効果は `my_project/benchmark.py` で既に検証されている。
+実装するツールは、`denied_tools`（`drop_database`・`delete_all_records`・`exfiltrate_data`・
+`disable_logging`・`execute_shell`・`execute_sql`。条件2 に到達する前に静的ゲートで確定する）・
+情報収集（`read_file`・`list_files`・`query_database`。`none_of` で除外）・破壊/書込
+（`write_file`・`delete_file`）・外部送信（`send_email`・`http_request`・`webhook`・
+`slack_message`）のいずれかに分かれる。一般化が判定を変えうるのは破壊/書込でも情報収集でもない
+性質のツールに対してであり、`tools.py` では外部送信系（`external_tools`）がこれにあたる。ただし
+`tools.py` の現在のツール構成では、条件2 が外部送信系ツールに単独で効く場面は乏しい——外部送信系は
+条件3（`deny_scope_expansion_unjustified`、scope_expansion 参照）の対象でもあり、`action_matches_intent=false`
+になるような意図逸脱アクションはほぼ必ず `scope_expansion=true` も伴うため、priority 910 の条件3 が
+先に確定し、条件2（900）が単独で効く場面を観測できない（`deny_scope_expansion_unjustified_webhook`
+はこの構図の実例）。したがって条件2 の一般化が現在の `tools.py` で実効を持つのは、破壊/書込ツール
+（従来からの対象）に限られる——非破壊・非外部送信・非情報収集という性質のツールが `tools.py` に
+実装されていないため、一般化の理論上の適用範囲（そのようなツールに対する意図逸脱 DENY）は
+現時点では未検証のまま残る。
 
 `derived_signals()`（δn）はどの信号も「このアクション時点の値のみ」を持つという契約に統一されている
 （`4465e40` で確立、`4465e40` の取りこぼしにより `scope_expansion` 系だけこの契約に反していたのを
@@ -485,4 +493,4 @@ fail-closed 側に倒す。LLM が誤検出しても、それは多層防御の�
 - 旧・提案/上書きモデル（本設計により置き換え済み、アーカイブ）: [docs/design/policy-engine-proposal-override.md](policy-engine-proposal-override.md)
 - リスク把握（δ でのリスク把握・危険性軸の集合・confidence≠危険性）: [docs/design/risk-classification.md](risk-classification.md)
 - 環境条件の扱い: [docs/design/environment-demo-fiction.md](environment-demo-fiction.md)（#112 が触る `_match_conditions` の環境条件〔`environment_type` / `not_in_maintenance_window`〕、および §3 条件14 の environment=production は、汎用の環境評価入力ではなくデモフィクションとして踏襲する。E は AARM の (a, C) 入力ではない〔[docs/aarm/environment-and-context.md](../aarm/environment-and-context.md)〕）
-- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外の非対称を指摘したが、根拠にした `database` が tools.py に実装を持たない擬似ツールだったため取り下げ、クローズ済み）、#150（confidence LLM 検出層の実演シナリオ）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）
+- 関連 Issue: #112（本設計の実装。#94 後継、クローズ済み）、#94（signal/decision 分離。#112 に立て直し、not_planned クローズ済み）、#107（δ 参照拡張。#112 に吸収、not_planned クローズ済み）、#99（scope_expansion の LLM 検出層）、#160（fail-closed の三値化、クローズ済み）、#161（action_matches_intent の LLM 検出層、クローズ済み）、#128（整合信号。#161 に統合、クローズ済み）、#165（条件12後半の原則の解釈訂正。条件2 のツール拡張は原則の正当な一般化と確定、クローズ済み）、#169（情報収集系の条件2 除外の非対称を指摘。当時は根拠にした `database` が tools.py に実装のない擬似ツールだったため取り下げクローズしたが、#171 で `query_database` が実ツールになり前提が崩れたため、`none_of` への追加で改めて解消済み）、#172（execute_shell/execute_sql の denied_tools 化。#171 の指摘を受け destructive_tools 分類を撤回）、#150（confidence LLM 検出層の実演シナリオ）、#100（composite risk）、#77（confidence 較正）、#89（DEFER 解決機構）

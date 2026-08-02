@@ -82,14 +82,14 @@ tool_classification:
     - http_request
     - webhook
     - slack_message
-  # 情報収集系ツール（read-only、それ自体では risk が materialize しない）。他の3つと違い
+  # 情報収集系ツール（読み取り専用で、それ自体では risk が顕在化しない）。他の3つと違い
   # Policy dataclass には持たない——sensitive_tools/destructive_tools/external_tools は
   # context_accumulator.py が δ 信号の導出（SENSITIVE_TOOL ラベル・scope_expansion 判定）に
   # 使うのに対し、この集合を Python 側で参照する δ 信号は無く、rules: 内の条件値としてのみ使う
   # （#174 での一元化。read_file/list_files/query_database を複数条件〔条件2・条件12前半・
   # defer_low_confidence〕に個別に書くと更新漏れが起きるため、単一のアンカーに集約する）。
   # list_files を含めるが、条件13（step_up_sensitive_read）はこのアンカーを使わない——
-  # significant access（機微データへの read）という別の軸の判定であり、list_files（ディレクトリ
+  # 重大アクセス（機微データへの read）という別の軸の判定であり、list_files（ディレクトリ
   # 一覧、PUBLIC）は対象外という意図的な違いを持つため。
   information_gathering_tools: &information_gathering_tools
     - read_file

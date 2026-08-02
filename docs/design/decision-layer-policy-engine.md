@@ -223,8 +223,8 @@ DEFER されていた）。情報収集系ツールの定義は `policy.yaml` �
 information_gathering_tools`（YAML アンカー）に一元化し、条件2 の `none_of`・
 `allow_information_gathering` の対象・`defer_low_confidence`/`step_up_low_confidence` の
 `none_of` の4箇所から同じアンカーを参照する（読み取り専用ツールが増えるたびに複数箇所を
-individually 更新する不整合を避けるため）。`step_up_sensitive_read`（条件13）はこのアンカーを
-使わない——significant access（機微データへの read）という別の軸の判定であり、`list_files`
+個別に更新する不整合を避けるため）。`step_up_sensitive_read`（条件13）はこのアンカーを
+使わない——重大アクセス（機微データへの read）という別の軸の判定であり、`list_files`
 （ディレクトリ一覧、PUBLIC）は対象外という意図的な違いを持つため。
 
 ### δ 参照の記法: `context.<signal>` 述語オブジェクト

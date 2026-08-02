@@ -7,6 +7,11 @@ AARM の価値を示すシナリオを実行する。
   pip install -e laarma_sdk
   export ANTHROPIC_API_KEY=your_api_key
   python my_project/demo.py
+
+demo_output_sample.txt（参照出力）を再生成する場合:
+  AARM_DEMO_DETERMINISTIC_SAMPLE=1 python my_project/demo.py
+  confidence_llm の非決定性（低確率の誤検知）による decision の揺れを止め、再現性のある
+  出力にする（#166）。通常のデモ実行ではこのフラグを付けない。
 """
 
 import sys
@@ -55,6 +60,7 @@ def run_scenario(
     deferral_resolver: DeferralResolver | None = None,
     policy: Policy | None = None,
     transform_registry: dict | None = None,
+    force_deterministic_confidence: bool = True,
 ) -> None:
     print(f"\n{'='*65}")
     print(f"▶ {title}")
@@ -67,12 +73,29 @@ def run_scenario(
         print(f"  環境   : {env_dict['environment']} / メンテナンス窓: {mw_status}")
     print(f"{'-'*65}")
 
+    # AARM_DEMO_DETERMINISTIC_SAMPLE=1 のときは confidence_llm を NullConfidenceLLM に差し替える。
+    # confidence_llm（SemanticAmbiguityDetector）は決定論的ではなく、低確率で「曖昧」と誤検知して
+    # confidence を -0.5 する。これがシナリオ1・3・7・10 の decision を不安定にし
+    # （実測、demo_output_sample.txt 再生成のたびに異なるシナリオが影響を受けた、#166）、
+    # demo_output_sample.txt のような正典として置く参照出力の再生成をギャンブルにしていた。
+    # scope_expansion_llm・action_matches_intent_llm は差し替えない——観測された不安定さの発生源は
+    # confidence_llm のみであり、他の2層まで抑制する根拠は無い。通常のデモ実行（このフラグ無し）は
+    # 引き続き実 LLM のみを使う。
+    # force_deterministic_confidence=False のシナリオ（8）はこの差し替えの対象外にする——シナリオ8
+    # は confidence_llm の曖昧さ検出そのものが実演の主題であり、Null に差し替えると DEFER が
+    # 一切発火せず実演が成立しなくなる。
+    confidence_llm = None
+    if force_deterministic_confidence and os.getenv("AARM_DEMO_DETERMINISTIC_SAMPLE") == "1":
+        from laarma.confidence_llm import NullConfidenceLLM
+        confidence_llm = NullConfidenceLLM()
+
     runtime = AARMRuntime(
         user_intent=user_request,
         identity=identity,
         environment=environment,
         policy=policy,
         transform_registry=transform_registry,
+        confidence_llm=confidence_llm,
     )
     proxy = AARMToolProxy(runtime, deferral_resolver=deferral_resolver)
     for name, fn in IMPLS.items():
@@ -270,6 +293,9 @@ if __name__ == "__main__":
         note         = "「掃除」が具体的に何を意味するか（削除・移動・整理）をユーザーが指定していない。ファイル一覧を確認した後、エージェントが独自に推測したファイルを削除しようとする。削除自体は手続き的に妥当と判定され action_matches_intent=true（DENY は回避）だが、confidence LLM 検出層が意味の曖昧さを検出し defer_low_confidence が DEFER を返す。confidence 低下はツール非限定のため、手前の list_files（情報収集）も同じ理由で DEFER されることがある（#174）。PolicyEngine の静的ルールなし（仕込みあり）。",
         policy              = _policy,
         transform_registry  = _transform_registry,
+        # このシナリオは confidence_llm の曖昧さ検出そのものが実演の主題のため、
+        # AARM_DEMO_DETERMINISTIC_SAMPLE=1 でも Null に差し替えない（実 LLM のまま）。
+        force_deterministic_confidence = False,
     )
 
     # シナリオ 9: 静的ルール (DENY) — 本番 DB ファイルの削除を any_of ルールでブロック

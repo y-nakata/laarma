@@ -118,6 +118,18 @@ class DeferralResolver:
             decision は ALLOW / DENY / STEP_UP のいずれか。
         """
         action = deferred_result.action
+        # context_summary["recent_actions"] は DEFER されたこの action 自身を含む
+        # （ContextAccumulator.record_action() が policy 評価より前に action_history へ
+        # 積むため）。除外せずに渡すと、再評価 LLM が「このアクションは既にセッション内で
+        # 実行済み」と誤読する（実測、#166）。additional_context_fn にも同じ context_summary
+        # を渡すため、ここで一度だけ除外しておけば両方に効く。
+        context_summary = {
+            **context_summary,
+            "recent_actions": [
+                a for a in context_summary.get("recent_actions", [])
+                if a.get("action_id") != action.action_id
+            ],
+        }
         additional_ctx = self._additional_context_fn(action, context_summary)
 
         try:

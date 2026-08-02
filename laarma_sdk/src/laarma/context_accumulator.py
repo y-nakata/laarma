@@ -53,19 +53,23 @@ def _extract_entities(tool_name: str, parameters: dict) -> set[str]:
     return entities
 
 
-# scope_expansion が None（LLM 呼び出し失敗により判定不能、#160）のときの追加減点。
+# scope_expansion・action_matches_intent が None（LLM 呼び出し失敗により判定不能、#160・#161）の
+# ときの追加減点の共通原則: 減点幅は、その信号自身が確定値のときに持つ効果の大きさをそのまま
+# 転用する（符号は常にマイナス側＝評価しにくい方向）。「判定不能」を新たな独立の不確実性として
+# 別の恣意的な値で表すのではなく、その信号がもともと確定的に持っている効果量を「情報が無いことの
+# コスト」として再利用する——同一信号内で閉じた選択にすることで、2信号間で係数を独立に増やさない。
+# magnitude 自体（0.25 / 0.1）は distance の 0.3 等と同様、根拠の裏取りがない暫定値（#77 較正対象）。
+
+# scope_expansion=true 自体が -0.25 の減点項を持つため、None もその -0.25 をそのまま転用する。
 # 「scope_expansion ではないと判定された」（減点なし）でも「scope_expansion と判定された」
-# （-0.25）でもなく、判定そのものができなかったことを confidence 側に反映する。
-# deny_scope_expansion_unjustified への断定的な誘導を避けつつ、評価不能な状態を放置しない
-# ため、確定した scope_expansion=True と同じ -0.25 を暫定値として使う（#77 較正対象）。
+# （-0.25）でもなく、判定そのものができなかったことを confidence 側に反映する——
+# deny_scope_expansion_unjustified への断定的な誘導を避けつつ、評価不能な状態を放置しない。
 _SCOPE_EXPANSION_UNDETERMINED_PENALTY = 0.25
 
-# action_matches_intent が None（LLM 呼び出し失敗により判定不能、#161）のときの追加減点。
-# action_matches_intent=true は +0.1 の加点（評価しやすさの根拠）だが、判定不能はその加点が
-# 得られないだけでなく、意図整合という評価軸そのものが不明であることを表すため、加点と同じ
-# 幅を減点として計上する（#77 較正対象。scope_expansion の -0.25 と揃えなかったのは、
-# scope_expansion=true 自体が -0.25 の既存減点項を持つのに対し、action_matches_intent=false
-# には対応する減点項が無く、加点の欠落分だけを不確実性として計上するのが対称的なため）。
+# action_matches_intent=true は +0.1 の加点（確定値側の効果量は "0.1"）を持つ。対応する減点項は
+# 無い（action_matches_intent=false は 0、中立）ため、None は同じ 0.1 という効果量を符号反転して
+# 減点として転用する。「加点が得られないだけ」（0 に留まる）ではなく、意図整合という評価軸自体が
+# 不明であることを、その軸が本来持つ効果量ぶんのコストとして計上する。
 _ACTION_MATCHES_INTENT_UNDETERMINED_PENALTY = 0.1
 
 
@@ -163,7 +167,7 @@ class ContextAccumulator:
 
         expanded, scope_expansion_detail = self._scope_expansion_llm.detect(
             self._context.user_intent, action.tool_name, action.parameters, self._external_tools,
-            recent_actions=_sanitize_recent_actions(self.recent_actions(n=5)),
+            recent_actions=_sanitize_recent_actions(self._recent_actions_excluding(action.action_id, n=5)),
         )
         self._scope_expansions.append(expanded)
         self._scope_expansion_details.append(scope_expansion_detail)
@@ -172,7 +176,7 @@ class ContextAccumulator:
 
         matches_intent, action_matches_intent_detail = self._action_matches_intent_llm.detect(
             self._context.user_intent, action.tool_name, action.parameters,
-            recent_actions=_sanitize_recent_actions(self.recent_actions(n=5)),
+            recent_actions=_sanitize_recent_actions(self._recent_actions_excluding(action.action_id, n=5)),
         )
         self._action_matches_intent_details.append(action_matches_intent_detail)
 
@@ -182,7 +186,7 @@ class ContextAccumulator:
             user_intent=self._context.user_intent,
             tool_name=action.tool_name,
             parameters=action.parameters,
-            recent_actions=_sanitize_recent_actions(self.recent_actions(n=5)),
+            recent_actions=_sanitize_recent_actions(self._recent_actions_excluding(action.action_id, n=5)),
         )
         self._confidence_llm_penalties.append(llm_penalty)
         self._confidence_llm_details.append(llm_detail)
@@ -216,6 +220,22 @@ class ContextAccumulator:
 
     def recent_actions(self, n: int = 5) -> list[dict]:
         actions = [e for e in self._context.action_history if e.get("type") != "tool_output"]
+        return list(reversed(actions[-n:]))
+
+    def _recent_actions_excluding(self, action_id: str, n: int = 5) -> list[dict]:
+        """
+        recent_actions() から指定した action_id を除いたものを返す。record_action() は
+        評価対象のアクションを他の処理より先に append_action() で履歴へ積むため（#156 の
+        δn 契約に伴う構造）、`self.recent_actions(n)` をそのまま LLM 検出層（scope_expansion_llm・
+        action_matches_intent_llm・confidence_llm）に渡すと、評価中のアクション自身が
+        「直近の（＝既に実行済みの）アクション」として見えてしまう。DeferralResolver の再評価
+        （deferral.py）でも同型の問題があり、DEFER されたアクションが「セッション内で既に
+        実行済み」と誤読される事実誤認の原因になっていた（#166）。
+        """
+        actions = [
+            e for e in self._context.action_history
+            if e.get("type") != "tool_output" and e.get("action_id") != action_id
+        ]
         return list(reversed(actions[-n:]))
 
     _DRIFT_WINDOW = 5

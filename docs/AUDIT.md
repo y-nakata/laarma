@@ -35,8 +35,8 @@ python my_project/demo.py
 | 値 | 意味 |
 |---|---|
 | `null` | 直接判断（DEFER/STEP_UP 経由なし） |
-| `"autonomous"` | DeferralResolver が自律解決（ALLOW/DENY） |
-| `"step_up"` | DeferralResolver が STEP_UP へ格上げ |
+| `"autonomous"` | （現在の実装では発生しない）DeferralResolver が自律解決（ALLOW/DENY）した場合の値として予約。#135 により `DeferralResolver` は常に決定論的に STEP_UP へ倒すため、現状はこの値を返さない |
+| `"step_up"` | DeferralResolver が STEP_UP へ格上げ（新情報が無いため常にこの経路、#135） |
 | `"human_approved"` | StepUpResolver で人間が承認 |
 | `"human_denied"` | StepUpResolver で人間が拒否 |
 

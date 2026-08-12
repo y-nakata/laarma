@@ -19,14 +19,18 @@ if result.decision == Decision.DEFER:
     result = resolved
 
 # result.decision は ALLOW / MODIFY / DENY / STEP_UP のいずれか
+# （DEFER を経由した場合、resolve() は常に STEP_UP を返す）
 if result.decision == Decision.ALLOW:
     ...  # ツールを実行
 elif result.decision == Decision.DENY:
     ...  # ブロック
 ```
 
-`DeferralResolver.resolve()` は ALLOW / DENY / STEP_UP を返す（DEFER は返さない）。
-STEP_UP になった場合は `StepUpResolver` で人間承認フローに進むか、DENY として扱う。
+`DeferralResolver.resolve()` は常に STEP_UP を返す（DEFER は返さない）。DEFER の発生源
+（同一 priority 競合／メンテナンス窓不足／confidence 低下のいずれも）は resolve() の時点で
+正当に扱える新しい情報を持たないため、決定論的に人間承認へエスカレーションする（#135。詳細は
+[docs/design/decision-layer-policy-engine.md](design/decision-layer-policy-engine.md) §4
+「DEFER 後の扱い」）。格上げられた STEP_UP は `StepUpResolver` で人間承認フローに進む。
 
 `AARMToolProxy` を使う場合はこのハンドリングが自動化されており、呼び出し側は
 `proxy.call()` の戻り値か `ToolBlocked` 例外だけを意識すればよい。

@@ -13,7 +13,7 @@ python my_project/demo.py
 | 変数 | デフォルト | 説明 |
 |------|---------|------|
 | `ANTHROPIC_API_KEY` | — | 必須 |
-| `AARM_MODEL` | `claude-sonnet-4-6` | DeferralResolver / SemanticAmbiguityDetector（confidence の LLM 検出層。#112 Phase C）が使うモデル |
+| `AARM_MODEL` | `claude-sonnet-4-6` | `confidence_llm`/`scope_expansion_llm`/`action_matches_intent_llm` の各 LLM 検出層が使うモデル（`DeferralResolver` は #135 で LLM 呼び出しを除去したため対象外） |
 | `AARM_LLM_TIMEOUT` | `30` | LLM 呼び出しタイムアウト（秒） |
 | `AARM_LLM_MAX_RETRIES` | `3` | LLM 呼び出し失敗時の最大リトライ回数 |
 | `AARM_DISTANCE_CALCULATOR` | `embedding` | `embedding` または `keyword`。詳細は [EMBEDDING.md](EMBEDDING.md) |

@@ -6,7 +6,6 @@ AARM Runtime — R1〜R6 統合
 from __future__ import annotations
 
 import os
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +54,11 @@ class AARMRuntime:
         )
         self._audit_log_path = os.getenv("AARM_AUDIT_LOG_PATH")
         self._receipt_secret = os.getenv("AARM_RECEIPT_SECRET")
-        # R6 MUST: identity の cryptographic binding 検証（Human/Agent 個別署名 + Service 包括署名）
+        # R6 MUST: identity の cryptographic binding 検証（Human/Agent 個別署名 + Service 包括署名）。
+        # AARM_IDENTITY_PUBKEY_DIR が未設定なら検証自体をスキップする（オプトイン、既存挙動を維持）。
+        # 設定されている場合、検証に失敗したら identity.verification_error に理由を記録する。
+        # PolicyEngine.evaluate() がこれを gate として参照し、privilege_scope と同じ fail-closed で
+        # DENY にする（#55 PR-4。以前は warnings.warn() のみで処理を止めなかった）。
         _pubkey_dir = os.getenv("AARM_IDENTITY_PUBKEY_DIR")
         if _pubkey_dir and identity is not None:
             for label, principal, verify in (
@@ -65,17 +68,17 @@ class AARMRuntime:
             ):
                 pubkey = _load_ed25519_pubkey(_pubkey_dir, principal)
                 if pubkey is None:
-                    warnings.warn(
+                    identity.verification_error = (
                         f"IdentityContext の {label} 公開鍵が {_pubkey_dir} に見つかりません"
-                        f"（{principal}.pub）。署名検証をスキップします。",
-                        stacklevel=2,
+                        f"（{principal}.pub）。"
                     )
+                    break
                 elif not verify(pubkey):
-                    warnings.warn(
+                    identity.verification_error = (
                         f"IdentityContext の {label}_signature が未設定または不正です。"
-                        f"identity.sign_{label}(private_key) で署名してから渡してください。",
-                        stacklevel=2,
+                        f"identity.sign_{label}(private_key) で署名してから渡してください。"
                     )
+                    break
 
     def intercept(self, tool_name: str, parameters: dict[str, Any]) -> AuthorizationResult:
         """

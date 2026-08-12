@@ -27,12 +27,13 @@ privilege_scope は「この主体はこのツールを呼んでよい」とい�
 
 ## 評価の位置づけ
 
-privilege_scope のチェックは **PolicyEngine（静的ゲート）** で行われる。denied_tools（絶対禁止）と並ぶ、コンテキストを見ずに即座に判定できる静的ルールであり、`rules` の priority 解決システムより手前で評価される。
+privilege_scope のチェックは **PolicyEngine（静的ゲート）** で行われる。identity 検証（R6 MUST）・denied_tools（絶対禁止）と並ぶ、コンテキストを見ずに即座に判定できる静的ルールであり、`rules` の priority 解決システムより手前で評価される。
 
 ```
 アクション要求
   ↓
 [PolicyEngine]
+  ├─ identity の検証に失敗？          → DENY  ← fail-closed（R6, #55 PR-4）
   ├─ identity/privilege_scope が未設定？ → DENY  ← fail-closed
   ├─ denied_tools にある？          → DENY
   ├─ privilege_scope にない？         → DENY  ← ここ

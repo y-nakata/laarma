@@ -77,8 +77,11 @@ Human・Agent は自分の層のみを個別署名し、Service は3層全体＋
 - `AARM_IDENTITY_PUBKEY_DIR` に、各主体の公開鍵 PEM を **principal の値そのものをファイル名**
   にして置く（例: `alice@example.com.pub`, `agent-svc@iam.pub`）。`AARMRuntime` がこの値で
   ファイルを探して検証する。
-- ディレクトリ未設定、または該当ファイルが無い場合は従来どおり警告のみで処理を続行する
-  （deny/flag はしない。これは PR-4 の領分）。
+- `AARM_IDENTITY_PUBKEY_DIR` **未設定**の場合は検証自体をスキップする（オプトイン）。
+  **設定されている**が公開鍵ファイルが無い、または署名が未設定/不正な場合は、
+  `IdentityContext.verification_error` がセットされ、`PolicyEngine`（`privilege_scope` と同じ
+  fail-closed の静的ゲート）が即 DENY する（R6 MUST、`decision_source="identity_verification"`、
+  #55 PR-4）。以前は警告のみで処理を続行していた。
 - デモ・ベンチマークでは `my_project/identity_keys.py` の `load_or_create_keypair()` が
   `keys/` 配下に鍵が無ければ自己生成する（第1段階・CA なし）。`keys/` は `.gitignore` 済みで
   コミットされない。

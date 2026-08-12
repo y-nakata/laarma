@@ -14,9 +14,9 @@ PolicyEngine.evaluate() は常に terminal な AuthorizationResult を返す単�
     マッチするならルール集合が矛盾しており、それは同一 priority 競合の枠組みでは捉えられない
     設定ミスである——δ 参照ルールを MODIFY より高 priority に置くことで意図整合性を担保する
     設計は Phase B の対象）。
-  - denied_tools / privilege_scope は `rules` の priority システムの外側にある独立した
-    事前チェックとして扱う（R3/Table I の Forbidden 分類——コンテキスト評価が完全に無視される
-    唯一の分類——に対応）。
+  - identity 検証 / denied_tools / privilege_scope は `rules` の priority システムの外側にある
+    独立した事前チェックとして扱う（R3/Table I の Forbidden 分類——コンテキスト評価が完全に
+    無視される唯一の分類——に対応）。identity 検証は R6 MUST（#55 PR-4）。
   - ルール条件は `context.<signal>` で δn（`derived_signals()`）と累積 view（`cumulative_signals()`、
     #156）をマージした dict を参照できる。両者はキーが重ならない（例: 現在値は
     `data_classification`、累積は `cumulative_data_classification`）。数値シグナル
@@ -190,6 +190,20 @@ class PolicyEngine:
         式(3)の π として (a, C, E) を評価し、常に terminal な AuthorizationResult を返す。
         """
         p = self._policy
+
+        # -1. identity 検証チェック — DENY は常に terminal
+        # R6 MUST: 検証可能なアイデンティティを欠くアクションは deny/flag されること（#55 PR-4）。
+        # AARMRuntime がコンストラクタで検証し、失敗時のみ action.identity.verification_error に
+        # 理由をセットする（AARM_IDENTITY_PUBKEY_DIR 未設定なら検証自体を行わないため None のまま）。
+        # fail-closed: privilege_scope と同じく、identity は信頼の起点であり検証できない主体を
+        # 通す理由がないため、flag して素通りさせる経路は持たない。
+        if action.identity and action.identity.verification_error:
+            return AuthorizationResult(
+                decision=Decision.DENY,
+                reason=f"identity の検証に失敗しました: {action.identity.verification_error}",
+                action=action,
+                decision_source="identity_verification",
+            )
 
         # 0. privilege_scope チェック — DENY は常に terminal
         # fail-closed: privilege_scope は ALLOW の明示的根拠（最小権限、仕様 R9）。

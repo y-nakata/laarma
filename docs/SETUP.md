@@ -20,7 +20,7 @@ python my_project/demo.py
 | `AARM_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | embedding 使用時のモデル名。日本語の意図文と英語のツール名を言語間で比較するため多言語モデルが必要 |
 | `AARM_AUDIT_LOG_PATH` | — | 監査ログ（Receipt）の出力先ファイルパス（省略で永続化なし）。詳細は [AUDIT.md](AUDIT.md) |
 | `AARM_RECEIPT_SECRET` | — | receipt_hash の HMAC-SHA256 署名鍵。未設定時は警告のみ（フォールバック: 鍵なし SHA-256）。詳細は [AUDIT.md](AUDIT.md) |
-| `AARM_IDENTITY_PUBKEY_DIR` | — | Human/Agent/Service の Ed25519 公開鍵（`{principal}.pub`）を置くディレクトリ。未設定時は identity 署名検証をスキップ（警告のみ）。詳細は [AUDIT.md](AUDIT.md) |
+| `AARM_IDENTITY_PUBKEY_DIR` | — | Human/Agent/Service の Ed25519 公開鍵（`{principal}.pub`）を置くディレクトリ。未設定時は identity 署名検証をスキップ。設定時、検証に失敗すると PolicyEngine が DENY する（R6 MUST、#55 PR-4）。詳細は [AUDIT.md](AUDIT.md) |
 | `HF_TOKEN` | — | Hugging Face 認証トークン。設定すると HF Hub への認証済みリクエストになり未認証警告が消える（未設定でもダウンロード・動作は可能） |
 | `AARM_DEMO_DETERMINISTIC_SAMPLE` | — | `my_project/demo.py` 専用（laarma_sdk 本体には無関係）。`1` を設定すると `confidence_llm`（`SemanticAmbiguityDetector`）を `NullConfidenceLLM` に差し替え、低確率の誤検知による decision の揺れを止める。`my_project/demo_output_sample.txt`（参照出力）の再生成時のみ使う想定で、通常のデモ実行では設定しない |
 

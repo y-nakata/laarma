@@ -78,6 +78,8 @@ service_signature:  str | None  # sign_service() で付与される包括署名�
 1. **freshness / revocation の検証がない**。発行時刻の鮮度も失効リスト照合もしない（第2段階のローカル CA で扱う）。ステップ5b として未着手のまま残る。
 2. ~~identity 欠如時に deny / flag しない。~~ **解決済み（PR-4, #55）。** 未署名・公開鍵欠如時は `IdentityContext.verification_error` がセットされ、`PolicyEngine.evaluate()` が `privilege_scope` と同じ fail-closed の gate として DENY する（`decision_source="identity_verification"`）。以前は `warnings.warn()` のみで処理が流れていた。
 
+   **適合性上の留保**: この deny/flag は `AARM_IDENTITY_PUBKEY_DIR`（検証鍵の置き場所）が設定されている場合にのみ働く。未設定のまま（既定構成）だと検証自体が走らず、未署名の identity がそのまま通る。これはオプトインを意図的に維持した設計判断であり（鍵基盤を用意していない環境で全アクションが DENY になる事態を避けるため。#94 系の学習用途に沿う）、実装漏れではない。しかし結果として、「deny/flag は実装済み」は**検証鍵を設定した場合に限り真**であり、既定構成では R6 のこの部分は充足していない。#174 で R3(c) の適用範囲を明示的に限定した（`docs/design/decision-layer-policy-engine.md` §4）のと同種の構図として、ここに明示しておく。
+
 ## 3. 設計方針
 
 > 本節は laarma の確定した設計方針である。CSA版 R6 の non-repudiation 要求と 4層の委任構造から導いた。

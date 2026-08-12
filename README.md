@@ -96,7 +96,7 @@ laarma/
 | R3 意図整合性評価 | MUST | 🔶 | `PolicyEngine.evaluate()` が式(3)の π を単一関数として実装（全マッチ収集 → priority 解決）。δ（semantic_distance・data_classification・confidence）を参照する match predicate は未実装（#112 Phase B で段階実装予定）のため、意図整合性の判定自体は骨格のみ。設計方針は [docs/design/decision-layer-policy-engine.md](docs/design/decision-layer-policy-engine.md) |
 | R4 5 種の認可決定 | MUST | ✅ | ALLOW / DENY / MODIFY / DEFER / STEP_UP |
 | R5 改ざん耐性レシート | MUST | ✅ | `AARM_RECEIPT_SECRET` 設定時は HMAC-SHA256。未設定時は警告＋SHA-256 フォールバック |
-| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext` が Human/Agent/Service 各主体の Ed25519 鍵で署名（個別署名 + Service の包括署名）。非対称署名・主体分離、および identity 欠如/検証失敗時の deny/flag（`PolicyEngine` の fail-closed gate）は実装済み。freshness/revocation 検証は未実装。設計は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
+| R6 アイデンティティバインディング | MUST | ⚠️ | `IdentityContext` が Human/Agent/Service 各主体の Ed25519 鍵で署名（個別署名 + Service の包括署名）。非対称署名・主体分離、および identity 欠如/検証失敗時の deny/flag（`PolicyEngine` の fail-closed gate）は実装済みだが、後者は `AARM_IDENTITY_PUBKEY_DIR`（検証鍵の置き場所）を設定した場合にのみ有効（既定構成では検証自体が走らない。適合性上の留保、詳細は設計メモ参照）。freshness/revocation 検証は未実装。設計は [docs/design/identity-signing.md](docs/design/identity-signing.md) |
 | R7 意図ドリフト追跡 | SHOULD | 🔶 | 距離履歴からの意図ドリフト観測（`drift_observation`: `average`・`max`・`recent_avg`・`drift_trend`）とセッション累積の `scope_expansion_recent`（`cumulative_signals`）で追跡する。δ（`derived_signals`）には Cn に蓄積されるステップ毎の signal 値のみを置き、集計・トレンド・累積系の観測量（履歴として溜める意味のない毎回導出値・距離一次履歴・セッション累積値）は `drift_observation`・`cumulative_signals` に分離している |
 | R8 テレメトリエクスポート | SHOULD | ❌ | JSONL 出力のみ・OpenTelemetry 未対応 |
 | R9 最小権限強制 | SHOULD | ✅ | `privilege_scope` を PolicyEngine の静的ゲートで評価。詳細は [docs/PRIVILEGE.md](docs/PRIVILEGE.md) |

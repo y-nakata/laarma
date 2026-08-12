@@ -5,14 +5,10 @@ AARM 仕様 Section IV-B4 / R6 の DEFER 定義:
   「コンテキストが不十分・曖昧・内部矛盾の場合、安全な allow/deny にコミットする
    よりも実行を一時保留する」
 
-DEFER を出せること自体は R4（MUST: policy engine は ALLOW/DENY/MODIFY/STEP_UP/DEFER の
-5決定のいずれかを出せなければならない）が要求し、PolicyEngine が満たす。DEFER 後の解決機構の
-中身を規定する適合要件は存在しない（適合性は R3(a)(b)(c) で判定される。`docs/aarm/deferral.md`
-参照）ため、機構の設計は laarma の選択である。
-
-laarma の現状（#135）は、DEFER の発生源（同一 priority 競合／メンテナンス窓不足／confidence
-低下）のいずれについても、resolve() が呼ばれる時点で正当に扱える新しい情報を持たない
-（追加コンテンツ収集の実装が無く、環境状態の待機も
+R4 は DEFER 後の解決機構を SHOULD として求めるが、機構の中身（自動 or 人間支援）は
+規定しない。laarma の現状（#135）は、DEFER の発生源（同一 priority 競合／メンテナンス窓
+不足／confidence 低下）のいずれについても、resolve() が呼ばれる時点で正当に扱える新しい
+情報を持たない（追加コンテンツ収集の実装が無く、環境状態の待機も
 docs/design/environment-demo-fiction.md の確定判断によりデモフィクションの域を出ない）。
 
 新情報が無い以上、LLM にここで ALLOW/DENY/STEP_UP の decision を出させる正当な根拠は無い

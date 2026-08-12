@@ -185,13 +185,16 @@ def run_case(
         session_id=case.id,
         privilege_scope=privilege_scope,
     )
-    # R6: 未署名だと AARMRuntime が警告を出す
-    identity = (
-        identity
-        .sign_human(_BENCHMARK_HUMAN_KEY)
-        .sign_agent(_BENCHMARK_AGENT_KEY)
-        .sign_service(_BENCHMARK_SERVICE_KEY)
-    )
+    # R6: 署名しないと AARMRuntime が identity.verification_error をセットし、PolicyEngine が
+    # fail-closed で DENY する（#55 PR-4）。identity.unsigned でこの経路自体を検証するケースを
+    # 書けるようにする（署名をスキップし、意図的に verification_error を発生させる）。
+    if not (case.identity and case.identity.get("unsigned")):
+        identity = (
+            identity
+            .sign_human(_BENCHMARK_HUMAN_KEY)
+            .sign_agent(_BENCHMARK_AGENT_KEY)
+            .sign_service(_BENCHMARK_SERVICE_KEY)
+        )
     policy_path = Path(__file__).parent / case.policy_file if case.policy_file else _POLICY_PATH
     policy = load_policy(policy_path)
     # pipeline_only ケースを --pipeline 付きで実行するときだけ実 LLM

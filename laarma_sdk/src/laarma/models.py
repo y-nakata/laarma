@@ -56,6 +56,11 @@ class IdentityContext:
     human_signature:   str | None = field(default=None)
     agent_signature:   str | None = field(default=None)
     service_signature: str | None = field(default=None)
+    # R6 MUST: identity 欠如/検証失敗時の deny/flag（#55 PR-4）。署名対象には含めない
+    # （検証結果であって identity の主張の一部ではない）。AARMRuntime が構築直後に
+    # 検証し、この属性へ直接セットする（sign_* と違い replace() で新インスタンスは作らない
+    # ——検証は同一セッションの全アクションが共有する1つの IdentityContext に対して行う）。
+    verification_error: str | None = field(default=None)
 
     def _human_payload(self) -> bytes:
         return json.dumps(
@@ -137,6 +142,8 @@ class IdentityContext:
             d["agent_signature"] = self.agent_signature
         if self.service_signature:
             d["service_signature"] = self.service_signature
+        if self.verification_error:
+            d["verification_error"] = self.verification_error
         return d
 
 
@@ -188,7 +195,7 @@ class AuthorizationResult:
     timestamp:             datetime        = field(default_factory=lambda: datetime.now(timezone.utc))
     # ポリシー参照 — 仕様 R5: "receipt must include the policy context used in evaluation"
     policy_rule_id:        str | None      = None   # 発火した StaticRule.id (PolicyEngine のみ)
-    decision_source:       str             = "policy_engine"  # "policy_engine" | "denied_tools" | "privilege_scope" | "baseline_allow" | "deferral_resolver" | "step_up_resolver"
+    decision_source:       str             = "policy_engine"  # "policy_engine" | "denied_tools" | "privilege_scope" | "identity_verification" | "baseline_allow" | "deferral_resolver" | "step_up_resolver"
     # #112 Phase C: confidence 計算への LLM 検出層による減点幅・検出理由。decision には
     # 関与しない（decision を出すのはポリシーの confidence 閾値ルール）が、どの decision が
     # 決定論由来でどれが confidence 経由（LLM 検出含む）で下されたかを切り分けられるよう

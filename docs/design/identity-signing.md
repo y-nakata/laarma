@@ -75,8 +75,8 @@ service_signature:  str | None  # sign_service() で付与される包括署名�
 
 非対称署名・主体分離は実装済みだが、R6 の要件のうち次が未充足（§5 のステップ5 で扱う）:
 
-1. **freshness / revocation の検証がない**。発行時刻の鮮度も失効リスト照合もしない（第2段階のローカル CA で扱う）。
-2. **identity 欠如時に deny / flag しない**。未署名・公開鍵欠如時は warning のみで処理が流れる（R6 MUST。検証可能なアイデンティティを欠くアクションを deny/flag する要件への対応）。
+1. **freshness / revocation の検証がない**。発行時刻の鮮度も失効リスト照合もしない（第2段階のローカル CA で扱う）。ステップ5b として未着手のまま残る。
+2. ~~identity 欠如時に deny / flag しない。~~ **解決済み（PR-4, #55）。** 未署名・公開鍵欠如時は `IdentityContext.verification_error` がセットされ、`PolicyEngine.evaluate()` が `privilege_scope` と同じ fail-closed の gate として DENY する（`decision_source="identity_verification"`）。以前は `warnings.warn()` のみで処理が流れていた。
 
 ## 3. 設計方針
 
@@ -183,9 +183,11 @@ ECDSA P-256 / RSA は、既存 PKI（組織の証明書基盤、HSM、WebPKI）�
 2. ✅ **鍵の分離**（PR-1b, #83）: receipt の tamper-evidence（システムの鍵）と identity の non-repudiation（各主体の鍵）を分ける。
 3. ✅ **非対称署名化**（PR-2, #86）: HMAC → Ed25519（§4 の通り、3主体とも Ed25519。プロトタイプ第1段階では Human も自己生成）。
 4. ✅ **二段署名化**（PR-2, #86 に統合実施）: 当事者（Human / Agent）の個別署名 + 調停者（Service）の包括署名。
-5. **検証の充実**（未着手）: freshness / revocation（第2段階のローカル CA で CRL 照合をデモ）、identity 欠如時の deny/flag。
+5. **検証の充実**:
+   - ✅ **5a. identity 欠如/検証失敗時の deny/flag**（PR-4, #55）: 実装済み。
+   - **5b. freshness / revocation**（第2段階のローカル CA で CRL 照合をデモ、オプション）: 未着手。
 
 ## 関連
 
-- README の仕様準拠表の R6 は、本メモ §3〜§4 の非対称署名・主体分離が実装された旨を反映する（freshness/revocation・deny/flag は §5 ステップ5 待ちのため、まだ「✅ 準拠」への変更はしない）。
+- README の仕様準拠表の R6 は、本メモ §3〜§4 の非対称署名・主体分離に加え、ステップ5a（identity 欠如/検証失敗時の deny/flag）が実装された旨を反映する（freshness/revocation〔ステップ5b〕は未着手のため、まだ「✅ 準拠」への変更はしない）。
 - レシートの tamper-evidence 範囲（deferral 系フィールドがハッシュ対象外）については #45。
